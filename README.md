@@ -31,7 +31,9 @@ That command should open a small Tk demo window. If it reports an `init.tcl` or 
 5. Use **Export WAV** and choose any folder. The resulting file is a 44.1 kHz, 16-bit, mono PCM WAV.
 6. Drag the WAV into the Unity Project window or save it directly beneath `Assets`.
 
-Each of the four layers has its own sine, square, triangle, or sawtooth oscillator, frequency, gain, phase, pitch sweep, and active start/end time. The white-noise seed is deterministic, so the same project always renders the same sound.
+Each of the four layers has its own sine, square, triangle, or sawtooth oscillator, frequency, gain, phase, pitch sweep, active start/end time, FM modulation, amplitude LFO, and ADSR envelope. This allows a sharp transient layer to sit above a sustained body or tail.
+
+The master effects panel includes deterministic white or pink noise, low-pass filtering, soft distortion, feedback delay, and a compact multi-tap reverb. All controls default to neutral values, so existing projects keep their previous sound.
 
 ## Variations
 

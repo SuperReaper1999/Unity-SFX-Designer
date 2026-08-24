@@ -49,6 +49,14 @@ class Layer:
     sweep_end: float = 0.0
     start_time: float = 0.0
     end_time: float = 1.0
+    fm_frequency: float = 0.0
+    fm_depth_hz: float = 0.0
+    lfo_frequency: float = 0.0
+    lfo_depth: float = 0.0
+    attack: float = 0.0
+    decay: float = 0.0
+    sustain: float = 1.0
+    release: float = 0.0
 
 
 def default_state() -> dict[str, Any]:
@@ -64,10 +72,15 @@ def default_state() -> dict[str, Any]:
         "sustain": 0.7,
         "release": 0.16,
         "noise_enabled": False,
+        "noise_color": "white",
         "noise_gain": 0.0,
         "noise_seed": 1337,
         "lowpass_hz": 0.0,
         "distortion": 0.0,
+        "delay_time": 0.0,
+        "delay_feedback": 0.25,
+        "delay_mix": 0.0,
+        "reverb_mix": 0.0,
         "normalize": True,
         "preset": "Custom",
         "layers": [asdict(Layer(enabled=index == 0)) for index in range(4)],
@@ -121,7 +134,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "Explosion Burst": make_preset(
         "Explosion Burst", name="Explosion_Burst", duration=1.25, attack=0.002,
         decay=0.18, sustain=0.28, release=0.44, noise_enabled=True, noise_gain=0.5,
-        lowpass_hz=2200, distortion=0.35, layers=[
+        lowpass_hz=2200, distortion=0.35, reverb_mix=0.18, layers=[
             asdict(Layer(True, 58, 0.75, 0, -36, 0, 0, 0.9)),
             asdict(Layer(True, 112, 0.28, 0, -80, 0, 0, 0.55)),
             asdict(Layer(True, 260, 0.1, 0, -170, 0, 0, 0.2)),
@@ -177,9 +190,16 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     result["sustain"] = clamp(float(result["sustain"]), 0.0, 1.0)
     result["release"] = max(0.0, float(result["release"]))
     result["noise_gain"] = clamp(float(result["noise_gain"]), 0.0, 1.0)
+    result["noise_color"] = str(result["noise_color"]).lower()
+    if result["noise_color"] not in ("white", "pink"):
+        result["noise_color"] = "white"
     result["noise_seed"] = int(result["noise_seed"])
     result["lowpass_hz"] = max(0.0, float(result["lowpass_hz"]))
     result["distortion"] = clamp(float(result["distortion"]), 0.0, 1.0)
+    result["delay_time"] = clamp(float(result["delay_time"]), 0.0, 2.0)
+    result["delay_feedback"] = clamp(float(result["delay_feedback"]), 0.0, 0.95)
+    result["delay_mix"] = clamp(float(result["delay_mix"]), 0.0, 1.0)
+    result["reverb_mix"] = clamp(float(result["reverb_mix"]), 0.0, 1.0)
     result["noise_enabled"] = bool(result["noise_enabled"])
     result["normalize"] = bool(result["normalize"])
 
@@ -200,6 +220,14 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
         layer["sweep_end"] = clamp(float(layer["sweep_end"]), -19000.0, 19000.0)
         layer["start_time"] = clamp(float(layer["start_time"]), 0.0, result["duration"])
         layer["end_time"] = clamp(float(layer["end_time"]), layer["start_time"], result["duration"])
+        layer["fm_frequency"] = clamp(float(layer["fm_frequency"]), 0.0, 20000.0)
+        layer["fm_depth_hz"] = clamp(float(layer["fm_depth_hz"]), 0.0, 19000.0)
+        layer["lfo_frequency"] = clamp(float(layer["lfo_frequency"]), 0.0, 100.0)
+        layer["lfo_depth"] = clamp(float(layer["lfo_depth"]), 0.0, 1.0)
+        layer["attack"] = max(0.0, float(layer["attack"]))
+        layer["decay"] = max(0.0, float(layer["decay"]))
+        layer["sustain"] = clamp(float(layer["sustain"]), 0.0, 1.0)
+        layer["release"] = max(0.0, float(layer["release"]))
         result["layers"].append(layer)
     result["version"] = PROJECT_VERSION
     return result
@@ -232,6 +260,11 @@ def oscillator(waveform: str, phase: float) -> float:
     return math.sin(phase)
 
 
+def layer_envelope(time_seconds: float, layer: dict[str, Any]) -> float:
+    layer_time = time_seconds - layer["start_time"]
+    return envelope(layer_time, max(0.0001, layer["end_time"] - layer["start_time"]), layer)
+
+
 def generate_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict[str, Any]]:
     """Synthesize a deterministic mono floating-point buffer."""
     state = validate_state(raw_state)
@@ -240,6 +273,7 @@ def generate_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict[str, 
     duration = state["duration"]
     samples = [0.0] * count
     random_source = random.Random(state["noise_seed"])
+    pink_noise = 0.0
 
     for sample_index in range(count):
         time_seconds = sample_index / sample_rate
@@ -250,11 +284,20 @@ def generate_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict[str, 
             layer_duration = max(0.0001, layer["end_time"] - layer["start_time"])
             progress = clamp((time_seconds - layer["start_time"]) / layer_duration, 0.0, 1.0)
             frequency = layer["frequency"] + layer["sweep_start"] * (1.0 - progress) + layer["sweep_end"] * progress
+            if layer["fm_frequency"] > 0.0 and layer["fm_depth_hz"] > 0.0:
+                frequency += math.sin(math.tau * layer["fm_frequency"] * time_seconds) * layer["fm_depth_hz"]
             frequency = clamp(frequency, 1.0, sample_rate * 0.45)
             phase = math.radians(layer["phase_degrees"])
-            value += oscillator(layer["waveform"], math.tau * frequency * time_seconds + phase) * layer["gain"]
+            amplitude = 1.0
+            if layer["lfo_frequency"] > 0.0 and layer["lfo_depth"] > 0.0:
+                amplitude = 1.0 - layer["lfo_depth"] * 0.5 + math.sin(math.tau * layer["lfo_frequency"] * time_seconds) * layer["lfo_depth"] * 0.5
+            value += oscillator(layer["waveform"], math.tau * frequency * time_seconds + phase) * layer["gain"] * amplitude * layer_envelope(time_seconds, layer)
         if state["noise_enabled"]:
-            value += random_source.uniform(-1.0, 1.0) * state["noise_gain"]
+            white = random_source.uniform(-1.0, 1.0)
+            if state["noise_color"] == "pink":
+                pink_noise = pink_noise * 0.985 + white * 0.15
+                white = pink_noise
+            value += white * state["noise_gain"]
         samples[sample_index] = value * envelope(time_seconds, duration, state)
 
     if state["lowpass_hz"] > 0.0:
@@ -269,6 +312,23 @@ def generate_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict[str, 
         drive = 1.0 + state["distortion"] * 14.0
         for index, value in enumerate(samples):
             samples[index] = math.tanh(value * drive) / math.tanh(drive)
+
+    if state["delay_time"] > 0.0 and state["delay_mix"] > 0.0:
+        delay_samples = max(1, int(state["delay_time"] * sample_rate))
+        delayed = [0.0] * len(samples)
+        for index, value in enumerate(samples):
+            echo = delayed[index - delay_samples] if index >= delay_samples else 0.0
+            delayed[index] = value + echo * state["delay_feedback"]
+            samples[index] = value * (1.0 - state["delay_mix"]) + echo * state["delay_mix"]
+
+    if state["reverb_mix"] > 0.0:
+        reverbed = samples[:]
+        for delay_seconds, gain in ((0.029, 0.38), (0.047, 0.27), (0.071, 0.19)):
+            delay_samples = int(delay_seconds * sample_rate)
+            for index in range(delay_samples, len(samples)):
+                reverbed[index] += samples[index - delay_samples] * gain
+        for index, value in enumerate(samples):
+            samples[index] = value * (1.0 - state["reverb_mix"]) + reverbed[index] * state["reverb_mix"]
 
     peak = max((abs(value) for value in samples), default=0.0)
     if state["normalize"] and peak > 0.000001:
@@ -431,11 +491,17 @@ class SfxDesigner:
         effects_frame = ttk.LabelFrame(parent, text="Noise and master effects", padding=8)
         effects_frame.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         self.global_vars["noise_enabled"] = tk.BooleanVar(value=False)
-        ttk.Checkbutton(effects_frame, text="White noise", variable=self.global_vars["noise_enabled"]).grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self._add_field(effects_frame, 0, 1, "Noise gain", "noise_gain", 0.0)
-        self._add_field(effects_frame, 0, 3, "Seed", "noise_seed", 1337)
+        ttk.Checkbutton(effects_frame, text="Noise", variable=self.global_vars["noise_enabled"]).grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.global_vars["noise_color"] = tk.StringVar(value="white")
+        ttk.Combobox(effects_frame, textvariable=self.global_vars["noise_color"], values=("white", "pink"), state="readonly", width=8).grid(row=0, column=1, sticky="w", padx=(0, 8))
+        self._add_field(effects_frame, 0, 2, "Noise gain", "noise_gain", 0.0)
+        self._add_field(effects_frame, 0, 4, "Seed", "noise_seed", 1337)
         self._add_field(effects_frame, 1, 0, "Low-pass Hz (0 off)", "lowpass_hz", 0.0, 12)
         self._add_field(effects_frame, 1, 2, "Distortion", "distortion", 0.0)
+        self._add_field(effects_frame, 1, 4, "Delay seconds", "delay_time", 0.0)
+        self._add_field(effects_frame, 1, 6, "Delay feedback", "delay_feedback", 0.25)
+        self._add_field(effects_frame, 2, 0, "Delay mix", "delay_mix", 0.0)
+        self._add_field(effects_frame, 2, 2, "Reverb mix", "reverb_mix", 0.0)
 
         layers_frame = ttk.LabelFrame(parent, text="Oscillator layers", padding=8)
         layers_frame.grid(row=3, column=0, sticky="nsew")
@@ -455,6 +521,20 @@ class SfxDesigner:
                 ttk.Entry(layers_frame, textvariable=values[key], width=10).grid(row=index + 1, column=column, padx=3, pady=2)
             self.layer_vars.append(values)
 
+        shaping_frame = ttk.LabelFrame(parent, text="Per-layer modulation and envelope", padding=8)
+        shaping_frame.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        headers = ("FM Hz", "FM depth Hz", "LFO Hz", "LFO depth", "Attack", "Decay", "Sustain", "Release")
+        for column, title in enumerate(headers):
+            ttk.Label(shaping_frame, text=title, font=("Segoe UI", 9, "bold")).grid(row=0, column=column + 1, padx=3, pady=(0, 4), sticky="w")
+        for index, values in enumerate(self.layer_vars):
+            ttk.Label(shaping_frame, text=f"L{index + 1}").grid(row=index + 1, column=0, padx=(0, 3), pady=2, sticky="w")
+            for column, key, default in (
+                (1, "fm_frequency", 0.0), (2, "fm_depth_hz", 0.0), (3, "lfo_frequency", 0.0), (4, "lfo_depth", 0.0),
+                (5, "attack", 0.0), (6, "decay", 0.0), (7, "sustain", 1.0), (8, "release", 0.0),
+            ):
+                values[key] = tk.StringVar(value=str(default))
+                ttk.Entry(shaping_frame, textvariable=values[key], width=9).grid(row=index + 1, column=column, padx=3, pady=2)
+
     @staticmethod
     def _number(variable: tk.StringVar, label: str) -> float:
         try:
@@ -466,12 +546,13 @@ class SfxDesigner:
         state = default_state()
         for key in ("name",):
             state[key] = self.global_vars[key].get()
-        for key in ("duration", "master_gain", "attack", "decay", "sustain", "release", "noise_gain", "lowpass_hz", "distortion"):
+        for key in ("duration", "master_gain", "attack", "decay", "sustain", "release", "noise_gain", "lowpass_hz", "distortion", "delay_time", "delay_feedback", "delay_mix", "reverb_mix"):
             state[key] = self._number(self.global_vars[key], key.replace("_", " "))
         state["variation_amount"] = self._number(self.global_vars["variation_amount"], "variation percentage") / 100.0
         state["sample_rate"] = int(self.global_vars["sample_rate"].get())
         state["noise_seed"] = int(self._number(self.global_vars["noise_seed"], "noise seed"))
         state["noise_enabled"] = self.global_vars["noise_enabled"].get()
+        state["noise_color"] = self.global_vars["noise_color"].get()
         state["normalize"] = self.global_vars["normalize"].get()
         state["preset"] = self.preset_var.get()
         state["layers"] = []
@@ -724,6 +805,14 @@ def run_self_test() -> int:
     if len({tuple(samples[:256]) for samples in waveform_samples}) != 4:
         failures.append("Waveform choices did not create distinct audio")
 
+    advanced_state = default_state()
+    advanced_state["layers"][0].update({"fm_frequency": 37, "fm_depth_hz": 180, "lfo_frequency": 5, "lfo_depth": 0.7, "attack": 0.05, "release": 0.1})
+    advanced_state.update({"noise_enabled": True, "noise_color": "pink", "noise_gain": 0.1, "delay_time": 0.04, "delay_feedback": 0.35, "delay_mix": 0.25, "reverb_mix": 0.2})
+    advanced_samples, _ = generate_samples(advanced_state)
+    plain_samples, _ = generate_samples(default_state())
+    if advanced_samples == plain_samples or not any(advanced_samples):
+        failures.append("Advanced modulation or effects did not alter generated audio")
+
     variation_source = validate_state(copy.deepcopy(PRESETS["Pickup"]))
     variation_a = make_variation(variation_source, 0)
     variation_b = make_variation(variation_source, 0)
@@ -752,7 +841,7 @@ def run_self_test() -> int:
     if failures:
         print("Self-test failed:\n" + "\n".join(failures))
         return 1
-    print(f"Self-test passed: {len(PRESETS)} presets exported as 44.1 kHz 16-bit mono WAV; deterministic, variation, waveform, Unity Pack, silence, and input-clamping checks passed.")
+    print(f"Self-test passed: {len(PRESETS)} presets exported as 44.1 kHz 16-bit mono WAV; deterministic, waveform, modulation, effects, variation, Unity Pack, silence, and input-clamping checks passed.")
     return 0
 
 
