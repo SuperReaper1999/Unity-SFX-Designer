@@ -22,7 +22,7 @@ from typing import Any
 
 try:
     import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
+    from tkinter import filedialog, messagebox, simpledialog, ttk
 except ImportError:  # pragma: no cover - only relevant to unusual Python installs
     tk = None
 
@@ -41,6 +41,7 @@ MAX_DURATION_SECONDS = 12.0
 @dataclass
 class Layer:
     enabled: bool = False
+    waveform: str = "sine"
     frequency: float = 440.0
     gain: float = 0.25
     phase_degrees: float = 0.0
@@ -57,6 +58,7 @@ def default_state() -> dict[str, Any]:
         "duration": 0.75,
         "sample_rate": DEFAULT_SAMPLE_RATE,
         "master_gain": 0.8,
+        "variation_amount": 0.12,
         "attack": 0.01,
         "decay": 0.08,
         "sustain": 0.7,
@@ -161,6 +163,7 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     if result["sample_rate"] not in (22050, 44100, 48000):
         result["sample_rate"] = DEFAULT_SAMPLE_RATE
     result["master_gain"] = clamp(float(result["master_gain"]), 0.0, 2.0)
+    result["variation_amount"] = clamp(float(result["variation_amount"]), 0.0, 0.5)
     result["attack"] = max(0.0, float(result["attack"]))
     result["decay"] = max(0.0, float(result["decay"]))
     result["sustain"] = clamp(float(result["sustain"]), 0.0, 1.0)
@@ -179,6 +182,9 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
         layer = asdict(Layer())
         layer.update(raw)
         layer["enabled"] = bool(layer["enabled"])
+        layer["waveform"] = str(layer["waveform"]).lower()
+        if layer["waveform"] not in ("sine", "square", "triangle", "sawtooth"):
+            layer["waveform"] = "sine"
         layer["frequency"] = clamp(float(layer["frequency"]), 1.0, 20000.0)
         layer["gain"] = clamp(float(layer["gain"]), 0.0, 2.0)
         layer["phase_degrees"] = float(layer["phase_degrees"])
@@ -206,6 +212,18 @@ def envelope(time_seconds: float, duration: float, state: dict[str, Any]) -> flo
     return sustain
 
 
+def oscillator(waveform: str, phase: float) -> float:
+    """Return a band-unlimited oscillator sample for SFX design previews."""
+    if waveform == "square":
+        return 1.0 if math.sin(phase) >= 0.0 else -1.0
+    if waveform == "triangle":
+        return (2.0 / math.pi) * math.asin(math.sin(phase))
+    if waveform == "sawtooth":
+        cycle = (phase / math.tau) % 1.0
+        return cycle * 2.0 - 1.0
+    return math.sin(phase)
+
+
 def generate_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict[str, Any]]:
     """Synthesize a deterministic mono floating-point buffer."""
     state = validate_state(raw_state)
@@ -226,7 +244,7 @@ def generate_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict[str, 
             frequency = layer["frequency"] + layer["sweep_start"] * (1.0 - progress) + layer["sweep_end"] * progress
             frequency = clamp(frequency, 1.0, sample_rate * 0.45)
             phase = math.radians(layer["phase_degrees"])
-            value += math.sin(math.tau * frequency * time_seconds + phase) * layer["gain"]
+            value += oscillator(layer["waveform"], math.tau * frequency * time_seconds + phase) * layer["gain"]
         if state["noise_enabled"]:
             value += random_source.uniform(-1.0, 1.0) * state["noise_gain"]
         samples[sample_index] = value * envelope(time_seconds, duration, state)
@@ -266,6 +284,25 @@ def write_wav(path: str | Path, samples: list[float], sample_rate: int) -> None:
         output.writeframes(pcm)
 
 
+def make_variation(source: dict[str, Any], index: int) -> dict[str, Any]:
+    """Make a subtle, deterministic game-ready variation of a source sound."""
+    variation = validate_state(copy.deepcopy(source))
+    amount = variation["variation_amount"]
+    random_source = random.Random(variation["noise_seed"] + (index + 1) * 7919)
+    variation["name"] = f"{source['name']}_{index + 1:02d}"
+    variation["noise_seed"] += (index + 1) * 7919
+    variation["duration"] *= 1.0 + random_source.uniform(-amount * 0.35, amount * 0.35)
+    for layer in variation["layers"]:
+        if not layer["enabled"]:
+            continue
+        layer["frequency"] *= 1.0 + random_source.uniform(-amount, amount)
+        layer["gain"] *= 1.0 + random_source.uniform(-amount * 0.45, amount * 0.45)
+        layer["phase_degrees"] += random_source.uniform(-amount * 180.0, amount * 180.0)
+        layer["sweep_start"] *= 1.0 + random_source.uniform(-amount, amount)
+        layer["sweep_end"] *= 1.0 + random_source.uniform(-amount, amount)
+    return validate_state(variation)
+
+
 class SfxDesigner:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -297,6 +334,7 @@ class SfxDesigner:
         ttk.Button(toolbar, text="Preview", command=self.preview).grid(row=0, column=6, padx=3)
         ttk.Button(toolbar, text="Stop", command=self.stop_preview).grid(row=0, column=7, padx=3)
         ttk.Button(toolbar, text="Export WAV", command=self.export_wav).grid(row=0, column=8, padx=3)
+        ttk.Button(toolbar, text="Export Variations", command=self.export_variations).grid(row=0, column=9, padx=3)
 
         content = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
         content.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
@@ -327,6 +365,7 @@ class SfxDesigner:
         self._add_field(global_frame, 0, 0, "Name", "name", "NewSound", 16)
         self._add_field(global_frame, 0, 2, "Duration (s)", "duration", 0.75)
         self._add_field(global_frame, 0, 4, "Master gain", "master_gain", 0.8)
+        self._add_field(global_frame, 1, 2, "Variation %", "variation_amount", 12.0)
         ttk.Label(global_frame, text="Sample rate").grid(row=1, column=0, sticky="w", padx=(0, 4), pady=2)
         self.global_vars["sample_rate"] = tk.StringVar(value=str(DEFAULT_SAMPLE_RATE))
         ttk.Combobox(global_frame, textvariable=self.global_vars["sample_rate"], values=(22050, 44100, 48000), state="readonly", width=13).grid(row=1, column=1, sticky="w", padx=(0, 10), pady=2)
@@ -350,17 +389,19 @@ class SfxDesigner:
         self._add_field(effects_frame, 1, 0, "Low-pass Hz (0 off)", "lowpass_hz", 0.0, 12)
         self._add_field(effects_frame, 1, 2, "Distortion", "distortion", 0.0)
 
-        layers_frame = ttk.LabelFrame(parent, text="Sine-wave layers", padding=8)
+        layers_frame = ttk.LabelFrame(parent, text="Oscillator layers", padding=8)
         layers_frame.grid(row=3, column=0, sticky="nsew")
-        headers = ("On", "Frequency", "Gain", "Phase°", "Sweep start", "Sweep end", "Start", "End")
+        headers = ("On", "Wave", "Frequency", "Gain", "Phase°", "Sweep start", "Sweep end", "Start", "End")
         for column, title in enumerate(headers):
             ttk.Label(layers_frame, text=title, font=("Segoe UI", 9, "bold")).grid(row=0, column=column, padx=3, pady=(0, 4), sticky="w")
         for index in range(4):
             values: dict[str, Any] = {"enabled": tk.BooleanVar(value=index == 0)}
             ttk.Checkbutton(layers_frame, text=f"L{index + 1}", variable=values["enabled"]).grid(row=index + 1, column=0, sticky="w", padx=3, pady=2)
+            values["waveform"] = tk.StringVar(value="sine")
+            ttk.Combobox(layers_frame, textvariable=values["waveform"], values=("sine", "square", "triangle", "sawtooth"), state="readonly", width=10).grid(row=index + 1, column=1, padx=3, pady=2)
             for column, key, default in (
-                (1, "frequency", 440.0), (2, "gain", 0.25), (3, "phase_degrees", 0.0),
-                (4, "sweep_start", 0.0), (5, "sweep_end", 0.0), (6, "start_time", 0.0), (7, "end_time", 0.75),
+                (2, "frequency", 440.0), (3, "gain", 0.25), (4, "phase_degrees", 0.0),
+                (5, "sweep_start", 0.0), (6, "sweep_end", 0.0), (7, "start_time", 0.0), (8, "end_time", 0.75),
             ):
                 values[key] = tk.StringVar(value=str(default))
                 ttk.Entry(layers_frame, textvariable=values[key], width=10).grid(row=index + 1, column=column, padx=3, pady=2)
@@ -379,6 +420,7 @@ class SfxDesigner:
             state[key] = self.global_vars[key].get()
         for key in ("duration", "master_gain", "attack", "decay", "sustain", "release", "noise_gain", "lowpass_hz", "distortion"):
             state[key] = self._number(self.global_vars[key], key.replace("_", " "))
+        state["variation_amount"] = self._number(self.global_vars["variation_amount"], "variation percentage") / 100.0
         state["sample_rate"] = int(self.global_vars["sample_rate"].get())
         state["noise_seed"] = int(self._number(self.global_vars["noise_seed"], "noise seed"))
         state["noise_enabled"] = self.global_vars["noise_enabled"].get()
@@ -388,7 +430,8 @@ class SfxDesigner:
         for variables in self.layer_vars:
             state["layers"].append({
                 "enabled": variables["enabled"].get(),
-                **{key: self._number(variables[key], key.replace("_", " ")) for key in variables if key != "enabled"},
+                "waveform": variables["waveform"].get(),
+                **{key: self._number(variables[key], key.replace("_", " ")) for key in variables if key not in ("enabled", "waveform")},
             })
         return validate_state(state)
 
@@ -398,6 +441,8 @@ class SfxDesigner:
         for key, variable in self.global_vars.items():
             if key in ("noise_enabled", "normalize"):
                 variable.set(state[key])
+            elif key == "variation_amount":
+                variable.set(str(state[key] * 100.0))
             else:
                 variable.set(str(state[key]))
         for layer_state, variables in zip(state["layers"], self.layer_vars):
@@ -487,6 +532,24 @@ class SfxDesigner:
         except (ValueError, OSError, OverflowError) as error:
             messagebox.showerror(APP_TITLE, str(error))
 
+    def export_variations(self) -> None:
+        try:
+            source = self._state_from_ui()
+            count = simpledialog.askinteger(APP_TITLE, "How many variations?", parent=self.root, initialvalue=8, minvalue=2, maxvalue=50)
+            if count is None:
+                return
+            destination = filedialog.askdirectory(title="Choose a folder for WAV variations")
+            if not destination:
+                return
+            for index in range(count):
+                variation = make_variation(source, index)
+                samples, normalized = generate_samples(variation)
+                write_wav(Path(destination) / f"{normalized['name']}.wav", samples, normalized["sample_rate"])
+            self.status.set(f"Exported {count} deterministic variations to {Path(destination).name}")
+            messagebox.showinfo(APP_TITLE, f"Exported {count} Unity-ready WAV variations.")
+        except (ValueError, OSError, OverflowError) as error:
+            messagebox.showerror(APP_TITLE, str(error))
+
     def save_project(self) -> None:
         try:
             state = self._state_from_ui()
@@ -546,6 +609,20 @@ def run_self_test() -> int:
     if clamped["duration"] != 0.01 or clamped["sample_rate"] != DEFAULT_SAMPLE_RATE or clamped["master_gain"] != 2.0:
         failures.append("Invalid state was not clamped safely")
 
+    waveform_samples = []
+    for waveform in ("sine", "square", "triangle", "sawtooth"):
+        waveform_state = default_state()
+        waveform_state["layers"][0]["waveform"] = waveform
+        waveform_samples.append(generate_samples(waveform_state)[0])
+    if len({tuple(samples[:256]) for samples in waveform_samples}) != 4:
+        failures.append("Waveform choices did not create distinct audio")
+
+    variation_source = validate_state(copy.deepcopy(PRESETS["Pickup"]))
+    variation_a = make_variation(variation_source, 0)
+    variation_b = make_variation(variation_source, 0)
+    if generate_samples(variation_a)[0] != generate_samples(variation_b)[0]:
+        failures.append("Batch variation generation is not deterministic")
+
     with tempfile.TemporaryDirectory(prefix="sfx_designer_test_") as folder:
         for name, preset in PRESETS.items():
             samples, state = generate_samples(copy.deepcopy(preset))
@@ -561,7 +638,7 @@ def run_self_test() -> int:
     if failures:
         print("Self-test failed:\n" + "\n".join(failures))
         return 1
-    print(f"Self-test passed: {len(PRESETS)} presets exported as 44.1 kHz 16-bit mono WAV; deterministic, silence, and input-clamping checks passed.")
+    print(f"Self-test passed: {len(PRESETS)} presets exported as 44.1 kHz 16-bit mono WAV; deterministic, variation, waveform, silence, and input-clamping checks passed.")
     return 0
 
 
