@@ -1050,21 +1050,16 @@ class SfxDesigner:
         self.status.set("Piano roll cleared")
 
     def load_minor_loop(self) -> None:
-        self.music_vars["music_tempo_bpm"].set("112")
-        self.music_vars["music_steps"].set("16")
-        self.selected_music_track_var.set(0)
-        self.music_track_vars[0]["preset"].set("Pickup")
-        self.music_track_vars[0]["volume"].set("1.2")
-        self.music_track_vars[0]["notes"] = [
-            {"step": step, "midi": midi, "length": 2, "velocity": 0.92}
-            for step, chord in ((0, (57, 60, 64)), (4, (53, 57, 60)), (8, (55, 59, 62)), (12, (52, 55, 59)))
+        steps = self._music_step_count()
+        note_length = max(1, steps // 8)
+        selected_track = self._selected_music_track()
+        selected_track["notes"] = [
+            {"step": (chord_index * steps) // 4, "midi": midi, "length": note_length, "velocity": 0.92}
+            for chord_index, chord in enumerate(((57, 60, 64), (53, 57, 60), (55, 59, 62), (52, 55, 59)))
             for midi in chord
         ]
-        self.music_track_vars[1]["preset"].set("Custom")
-        self.music_track_vars[1]["volume"].set("1.25")
-        self.music_track_vars[1]["notes"] = [{"step": step, "midi": midi, "length": 4, "velocity": .9} for step, midi in ((0, 45), (4, 41), (8, 43), (12, 40))]
         self.draw_piano_roll()
-        self.status.set("Loaded editable minor loop")
+        self.status.set(f"Loaded minor loop notes into {selected_track['name'].get()}")
 
     def _set_selected_layer_from_slider(self, key: str, value: float, logarithmic: bool) -> None:
         if logarithmic:
