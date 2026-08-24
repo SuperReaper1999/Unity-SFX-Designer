@@ -29,7 +29,7 @@ That command should open a small Tk demo window. If it reports an `init.tcl` or 
 ## Workflow
 
 1. Use the **Design**, **Realism**, and **Mix & Export** tabs to shape the sound.
-2. Choose a preset category and preset, or configure the oscillator-layer fields.
+2. In the **Preset browser**, filter by category, search by name, or save commonly used sounds as favourites. Double-click to load; use **Preview selected** to load and audition a sound in one click.
 3. The waveform and spectrum update automatically after you pause editing briefly; **Refresh waveform** is still available on demand.
 4. Select **Preview** to hear it, then **Stop** to stop playback.
 5. Use **Save Project** to retain all editable settings in JSON.
@@ -40,6 +40,10 @@ Each of the four layers has its own sine, square, triangle, or sawtooth oscillat
 Use the **Quick global sliders** for fast shaping and the **Quick selected-layer sliders** for frequency, gain, FM depth, and LFO depth. Numeric fields remain available alongside them for exact values; the frequency slider uses a logarithmic scale so low and high frequencies are both practical to adjust.
 
 The Realism tab adds 4× oversampled rendering, white/pink/brown/band-limited noise, resonant filter modes, transient bursts, pitch drift/jitter, formant bands, soft distortion, feedback delay, and a compact mono room tail. These are tuned for weapon impacts and zombie vocalisations while retaining Unity-friendly mono positional audio.
+
+## Preset browser
+
+The preset browser keeps the built-in library out of the way of the design controls while making it quick to reuse. Filter by category, type part of a preset or category name, and use **Add favourite** for frequently used sounds. Favourites are stored locally in your Windows app-data folder, so updating the tool does not alter your project files or Git working tree.
 
 ## Variations
 

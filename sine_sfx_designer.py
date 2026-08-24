@@ -460,6 +460,11 @@ class SfxDesigner:
         self.selected_layer_var = tk.IntVar(value=0)
         self.quick_layer_scales: dict[str, tk.Scale] = {}
         self.quick_layer_values: dict[str, tk.StringVar] = {}
+        self.preset_var = tk.StringVar(value="Custom")
+        self.preset_category_filter = tk.StringVar(value="All categories")
+        self.preset_search_var = tk.StringVar()
+        self.favourites_only_var = tk.BooleanVar(value=False)
+        self.favorite_presets = self._load_favorite_presets()
         self._build_ui()
         self._load_state_into_ui(self.state)
         self._watch_waveform_controls()
@@ -470,27 +475,15 @@ class SfxDesigner:
         self.root.rowconfigure(1, weight=1)
         toolbar = ttk.Frame(self.root, padding=10)
         toolbar.grid(row=0, column=0, sticky="ew")
-        toolbar.columnconfigure(5, weight=1)
-
-        self.category_var = tk.StringVar(value="Custom")
-        self.preset_var = tk.StringVar(value="Custom")
-        ttk.Label(toolbar, text="Category").grid(row=0, column=0, padx=(0, 5))
-        category_box = ttk.Combobox(toolbar, textvariable=self.category_var, values=list(PRESET_CATEGORIES), state="readonly", width=13)
-        category_box.grid(row=0, column=1, padx=(0, 6))
-        category_box.bind("<<ComboboxSelected>>", lambda _event: self.update_preset_choices())
-        ttk.Label(toolbar, text="Preset").grid(row=0, column=2, padx=(0, 5))
-        self.preset_box = ttk.Combobox(toolbar, textvariable=self.preset_var, values=PRESET_CATEGORIES["Custom"], state="readonly", width=20)
-        preset_box = self.preset_box
-        preset_box.grid(row=0, column=3, padx=(0, 10))
-        preset_box.bind("<<ComboboxSelected>>", lambda _event: self.apply_preset())
-        ttk.Button(toolbar, text="New", command=self.new_project).grid(row=0, column=4, padx=3)
-        ttk.Button(toolbar, text="Open Project", command=self.open_project).grid(row=0, column=5, padx=3)
-        ttk.Button(toolbar, text="Save Project", command=self.save_project).grid(row=0, column=6, padx=3)
-        ttk.Button(toolbar, text="Preview", command=self.preview).grid(row=0, column=7, padx=3)
-        ttk.Button(toolbar, text="Stop", command=self.stop_preview).grid(row=0, column=8, padx=3)
-        ttk.Button(toolbar, text="Export WAV", command=self.export_wav).grid(row=0, column=9, padx=3)
-        ttk.Button(toolbar, text="Export Variations", command=self.export_variations).grid(row=0, column=10, padx=3)
-        ttk.Button(toolbar, text="Export Unity Pack", command=self.export_pack).grid(row=0, column=11, padx=3)
+        toolbar.columnconfigure(2, weight=1)
+        ttk.Button(toolbar, text="New", command=self.new_project).grid(row=0, column=0, padx=3)
+        ttk.Button(toolbar, text="Open Project", command=self.open_project).grid(row=0, column=1, padx=3)
+        ttk.Button(toolbar, text="Save Project", command=self.save_project).grid(row=0, column=2, padx=3, sticky="w")
+        ttk.Button(toolbar, text="Preview", command=self.preview).grid(row=0, column=3, padx=3)
+        ttk.Button(toolbar, text="Stop", command=self.stop_preview).grid(row=0, column=4, padx=3)
+        ttk.Button(toolbar, text="Export WAV", command=self.export_wav).grid(row=0, column=5, padx=3)
+        ttk.Button(toolbar, text="Export Variations", command=self.export_variations).grid(row=0, column=6, padx=3)
+        ttk.Button(toolbar, text="Export Unity Pack", command=self.export_pack).grid(row=0, column=7, padx=3)
 
         content = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
         content.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
@@ -529,6 +522,144 @@ class SfxDesigner:
         ttk.Label(parent, text=label).grid(row=row, column=column, sticky="w", padx=(0, 4), pady=2)
         ttk.Entry(parent, textvariable=variable, width=width).grid(row=row, column=column + 1, sticky="w", padx=(0, 10), pady=2)
 
+    @staticmethod
+    def _favourites_path() -> Path:
+        app_data = Path(os.environ.get("APPDATA", str(Path.home()))) / "UnitySfxDesigner"
+        return app_data / "preset_favourites.json"
+
+    def _load_favorite_presets(self) -> set[str]:
+        try:
+            saved = json.loads(self._favourites_path().read_text(encoding="utf-8"))
+            return {name for name in saved if name in PRESETS and name != "Custom"}
+        except (OSError, json.JSONDecodeError, TypeError):
+            return set()
+
+    def _save_favorite_presets(self) -> None:
+        try:
+            path = self._favourites_path()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(sorted(self.favorite_presets), indent=2), encoding="utf-8")
+        except OSError as error:
+            self.status.set(f"Could not save favourites: {error}")
+
+    def _build_preset_browser(self, parent: ttk.Frame) -> None:
+        browser = ttk.LabelFrame(parent, text="Preset browser", padding=8)
+        browser.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        browser.columnconfigure(1, weight=1)
+        browser.columnconfigure(3, weight=1)
+        ttk.Label(browser, text="Category").grid(row=0, column=0, sticky="w", padx=(0, 4))
+        category = ttk.Combobox(browser, textvariable=self.preset_category_filter,
+                                values=("All categories", *PRESET_CATEGORIES.keys()), state="readonly", width=16)
+        category.grid(row=0, column=1, sticky="ew", padx=(0, 10))
+        category.bind("<<ComboboxSelected>>", lambda _event: self._refresh_preset_browser())
+        ttk.Label(browser, text="Search").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        ttk.Entry(browser, textvariable=self.preset_search_var, width=20).grid(row=0, column=3, sticky="ew", padx=(0, 10))
+        ttk.Checkbutton(browser, text="Favourites only", variable=self.favourites_only_var,
+                        command=self._refresh_preset_browser).grid(row=0, column=4, sticky="w")
+
+        table_frame = ttk.Frame(browser)
+        table_frame.grid(row=1, column=0, columnspan=5, sticky="ew", pady=(7, 6))
+        table_frame.columnconfigure(0, weight=1)
+        self.preset_tree = ttk.Treeview(table_frame, columns=("category", "favourite"), show="tree headings", height=5,
+                                        selectmode="browse")
+        self.preset_tree.heading("#0", text="Preset")
+        self.preset_tree.heading("category", text="Category")
+        self.preset_tree.heading("favourite", text="Favourite")
+        self.preset_tree.column("#0", width=190, stretch=True)
+        self.preset_tree.column("category", width=105, stretch=False)
+        self.preset_tree.column("favourite", width=75, stretch=False, anchor="center")
+        self.preset_tree.grid(row=0, column=0, sticky="ew")
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.preset_tree.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.preset_tree.configure(yscrollcommand=scrollbar.set)
+        self.preset_tree.bind("<Double-1>", lambda _event: self.load_selected_preset())
+        self.preset_tree.bind("<Return>", lambda _event: self.load_selected_preset())
+        self.preset_tree.bind("<<TreeviewSelect>>", lambda _event: self._update_favourite_button())
+        self.preset_search_var.trace_add("write", lambda *_arguments: self._refresh_preset_browser())
+
+        actions = ttk.Frame(browser)
+        actions.grid(row=2, column=0, columnspan=5, sticky="ew")
+        ttk.Button(actions, text="Load selected", command=self.load_selected_preset).pack(side="left")
+        ttk.Button(actions, text="Preview selected", command=self.preview_selected_preset).pack(side="left", padx=(6, 0))
+        self.favourite_button = ttk.Button(actions, text="Add favourite", command=self.toggle_selected_favourite)
+        self.favourite_button.pack(side="left", padx=(6, 0))
+        ttk.Label(actions, text="Double-click loads a preset. Favourites are saved locally.").pack(side="right")
+        self._refresh_preset_browser()
+
+    def _filtered_presets(self) -> list[tuple[str, str]]:
+        category_filter = self.preset_category_filter.get()
+        query = self.preset_search_var.get().strip().lower()
+        matches: list[tuple[str, str]] = []
+        for category, presets in PRESET_CATEGORIES.items():
+            if category == "Custom" or (category_filter != "All categories" and category != category_filter):
+                continue
+            for name in presets:
+                if self.favourites_only_var.get() and name not in self.favorite_presets:
+                    continue
+                if query and query not in name.lower() and query not in category.lower():
+                    continue
+                matches.append((name, category))
+        return matches
+
+    def _refresh_preset_browser(self) -> None:
+        if not hasattr(self, "preset_tree"):
+            return
+        selected = self._selected_preset_name()
+        self.preset_tree.delete(*self.preset_tree.get_children())
+        for name, category in self._filtered_presets():
+            favourite = "★" if name in self.favorite_presets else ""
+            self.preset_tree.insert("", "end", iid=name, text=name, values=(category, favourite))
+        if selected and self.preset_tree.exists(selected):
+            self.preset_tree.selection_set(selected)
+            self.preset_tree.focus(selected)
+        elif self.preset_tree.get_children():
+            first = self.preset_tree.get_children()[0]
+            self.preset_tree.selection_set(first)
+            self.preset_tree.focus(first)
+        self._update_favourite_button()
+
+    def _selected_preset_name(self) -> str | None:
+        if not hasattr(self, "preset_tree"):
+            return None
+        selection = self.preset_tree.selection()
+        return selection[0] if selection else None
+
+    def _update_favourite_button(self) -> None:
+        if not hasattr(self, "favourite_button"):
+            return
+        name = self._selected_preset_name()
+        if not name:
+            self.favourite_button.configure(text="Add favourite", state="disabled")
+            return
+        self.favourite_button.configure(
+            text="Remove favourite" if name in self.favorite_presets else "Add favourite", state="normal")
+
+    def load_selected_preset(self) -> None:
+        name = self._selected_preset_name()
+        if not name:
+            self.status.set("Choose a preset first.")
+            return
+        self.preset_var.set(name)
+        self.apply_preset()
+
+    def preview_selected_preset(self) -> None:
+        if not self._selected_preset_name():
+            self.status.set("Choose a preset first.")
+            return
+        self.load_selected_preset()
+        self.preview()
+
+    def toggle_selected_favourite(self) -> None:
+        name = self._selected_preset_name()
+        if not name:
+            return
+        if name in self.favorite_presets:
+            self.favorite_presets.remove(name)
+        else:
+            self.favorite_presets.add(name)
+        self._save_favorite_presets()
+        self._refresh_preset_browser()
+
     def _build_controls(self, parent: ttk.Frame) -> None:
         notebook = ttk.Notebook(parent)
         notebook.grid(row=0, column=0, sticky="nsew")
@@ -540,8 +671,9 @@ class SfxDesigner:
         notebook.add(mix_tab, text="Mix & Export")
         parent = design_tab
         parent.columnconfigure(0, weight=1)
+        self._build_preset_browser(parent)
         global_frame = ttk.LabelFrame(parent, text="Global output", padding=8)
-        global_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        global_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         self._add_field(global_frame, 0, 0, "Name", "name", "NewSound", 16)
         self._add_field(global_frame, 0, 2, "Duration (s)", "duration", 0.75)
         self._add_field(global_frame, 0, 4, "Master gain", "master_gain", 0.8)
@@ -554,7 +686,7 @@ class SfxDesigner:
         ttk.Button(global_frame, text="Refresh waveform", command=self.refresh_waveform).grid(row=1, column=5, sticky="w", pady=2)
 
         envelope_frame = ttk.LabelFrame(parent, text="Master envelope (ADSR)", padding=8)
-        envelope_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        envelope_frame.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         self._add_field(envelope_frame, 0, 0, "Attack", "attack", 0.01)
         self._add_field(envelope_frame, 0, 2, "Decay", "decay", 0.08)
         self._add_field(envelope_frame, 0, 4, "Sustain", "sustain", 0.7)
@@ -715,9 +847,6 @@ class SfxDesigner:
     def _load_state_into_ui(self, raw_state: dict[str, Any]) -> None:
         state = validate_state(raw_state)
         preset = state.get("preset", "Custom")
-        category = next((name for name, presets in PRESET_CATEGORIES.items() if preset in presets), "Custom")
-        self.category_var.set(category)
-        self.update_preset_choices()
         self.preset_var.set(preset if preset in PRESETS else "Custom")
         for key, variable in self.global_vars.items():
             if key in ("noise_enabled", "normalize"):
@@ -731,11 +860,7 @@ class SfxDesigner:
                 variable.set(layer_state[key] if key == "enabled" else str(layer_state[key]))
         self.state = state
         self._refresh_quick_layer_sliders()
-
-    def update_preset_choices(self) -> None:
-        choices = PRESET_CATEGORIES[self.category_var.get()]
-        self.preset_box.configure(values=choices)
-        self.preset_var.set(choices[0])
+        self._refresh_preset_browser()
 
     def _watch_waveform_controls(self) -> None:
         for variable in self.global_vars.values():
