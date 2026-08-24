@@ -67,6 +67,19 @@ def make_sawtooth_showcase() -> dict:
 
 
 def make_sfx() -> dict[str, dict]:
+    sawtooth_rifle = copy.deepcopy(PRESETS["Rifle"])
+    sawtooth_rifle.update({"name": "Sawtooth_Rifle_Shot", "distortion": .26, "filter_cutoff_hz": 5200})
+    for layer in sawtooth_rifle["layers"]:
+        if layer["enabled"]:
+            layer["waveform"] = "sawtooth"
+
+    sawtooth_alert = copy.deepcopy(PRESETS["Zombie Scream"])
+    sawtooth_alert.update({"name": "Sawtooth_Zombie_Alert", "duration": .95, "pitch_drift_hz": 28,
+                            "formant_low_hz": 580, "formant_high_hz": 1650, "distortion": .2})
+    for layer in sawtooth_alert["layers"]:
+        if layer["enabled"]:
+            layer["waveform"] = "sawtooth"
+
     return {
         "Loot_Pickup": copy.deepcopy(PRESETS["Pickup"]),
         "Wooden_Melee_Impact": {**copy.deepcopy(PRESETS["Melee Impact"]), "name": "Wooden_Melee_Impact", "noise_color": "brown", "filter_cutoff_hz": 1250, "layers": [
@@ -76,6 +89,8 @@ def make_sfx() -> dict[str, dict]:
         ]},
         "Zombie_Alert": {**copy.deepcopy(PRESETS["Zombie Scream"]), "name": "Zombie_Alert", "duration": .95, "pitch_drift_hz": 24, "formant_low_hz": 620, "formant_high_hz": 1540},
         "Rifle_Shot": copy.deepcopy(PRESETS["Rifle"]),
+        "Sawtooth_Rifle_Shot": sawtooth_rifle,
+        "Sawtooth_Zombie_Alert": sawtooth_alert,
     }
 
 
@@ -94,7 +109,7 @@ def main() -> None:
     for name, state in make_sfx().items():
         state["name"] = name
         render(name, state, music=False)
-    print(f"Rendered 7 editable showcase sounds to {OUTPUT}")
+    print(f"Rendered 9 editable showcase sounds to {OUTPUT}")
 
 
 if __name__ == "__main__":
