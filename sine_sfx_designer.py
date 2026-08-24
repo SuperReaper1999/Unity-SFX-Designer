@@ -489,8 +489,10 @@ def generate_music_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict
             end = min(total_count, start + len(note_samples))
             mix[start:end] += np.asarray(note_samples[:end - start])
     peak = float(np.max(np.abs(mix))) if len(mix) else 0.0
-    if peak > 0.95:
-        mix *= 0.95 / peak
+    # Music is a complete mix rather than a one-shot layer: bring valid quiet
+    # loops up to a predictable Unity-friendly level while preserving silence.
+    if peak > 1e-9:
+        mix *= 0.9 / peak
     return np.clip(mix, -1, 1).tolist(), state
 
 
@@ -1051,14 +1053,16 @@ class SfxDesigner:
         self.music_vars["music_tempo_bpm"].set("112")
         self.music_vars["music_steps"].set("16")
         self.selected_music_track_var.set(0)
-        self.music_track_vars[0]["preset"].set("Ambient Hum")
+        self.music_track_vars[0]["preset"].set("Pickup")
+        self.music_track_vars[0]["volume"].set("1.2")
         self.music_track_vars[0]["notes"] = [
-            {"step": step, "midi": midi, "length": 2, "velocity": 0.72}
+            {"step": step, "midi": midi, "length": 2, "velocity": 0.92}
             for step, chord in ((0, (57, 60, 64)), (4, (53, 57, 60)), (8, (55, 59, 62)), (12, (52, 55, 59)))
             for midi in chord
         ]
         self.music_track_vars[1]["preset"].set("Custom")
-        self.music_track_vars[1]["notes"] = [{"step": step, "midi": midi, "length": 4, "velocity": .55} for step, midi in ((0, 45), (4, 41), (8, 43), (12, 40))]
+        self.music_track_vars[1]["volume"].set("1.25")
+        self.music_track_vars[1]["notes"] = [{"step": step, "midi": midi, "length": 4, "velocity": .9} for step, midi in ((0, 45), (4, 41), (8, 43), (12, 40))]
         self.draw_piano_roll()
         self.status.set("Loaded editable minor loop")
 
