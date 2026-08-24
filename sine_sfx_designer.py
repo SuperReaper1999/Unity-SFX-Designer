@@ -148,6 +148,14 @@ PRESETS: dict[str, dict[str, Any]] = {
     ),
 }
 
+PRESET_CATEGORIES: dict[str, tuple[str, ...]] = {
+    "Custom": ("Custom",),
+    "UI": ("UI Click", "Pickup"),
+    "Combat": ("Hit", "Gunshot Impact", "Explosion Burst"),
+    "Creatures": ("Zombie Groan",),
+    "Ambience": ("Ambient Hum",),
+}
+
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
@@ -284,6 +292,33 @@ def write_wav(path: str | Path, samples: list[float], sample_rate: int) -> None:
         output.writeframes(pcm)
 
 
+def safe_filename(name: str) -> str:
+    cleaned = "".join(character if character.isalnum() or character in "-_ " else "_" for character in name).strip(" .")
+    return cleaned or "NewSound"
+
+
+def export_unity_pack(destination: str | Path, source: dict[str, Any], variation_count: int = 1) -> list[Path]:
+    """Write Unity-ready WAVs and their editable recipe into one folder."""
+    if not 1 <= variation_count <= 50:
+        raise ValueError("Variation count must be between 1 and 50.")
+    destination = Path(destination)
+    destination.mkdir(parents=True, exist_ok=True)
+    state = validate_state(source)
+    base_name = safe_filename(state["name"])
+    recipe_path = destination / f"{base_name}.sfx.json"
+    with recipe_path.open("w", encoding="utf-8") as output:
+        json.dump(state, output, indent=2)
+
+    output_paths = [recipe_path]
+    rendered_states = [state] if variation_count == 1 else [make_variation(state, index) for index in range(variation_count)]
+    for rendered_state in rendered_states:
+        samples, normalized = generate_samples(rendered_state)
+        wav_path = destination / f"{safe_filename(normalized['name'])}.wav"
+        write_wav(wav_path, samples, normalized["sample_rate"])
+        output_paths.append(wav_path)
+    return output_paths
+
+
 def make_variation(source: dict[str, Any], index: int) -> dict[str, Any]:
     """Make a subtle, deterministic game-ready variation of a source sound."""
     variation = validate_state(copy.deepcopy(source))
@@ -310,10 +345,12 @@ class SfxDesigner:
         self.root.minsize(1120, 720)
         self.state = default_state()
         self.preview_file: str | None = None
+        self._waveform_job: str | None = None
         self.global_vars: dict[str, Any] = {}
         self.layer_vars: list[dict[str, Any]] = []
         self._build_ui()
         self._load_state_into_ui(self.state)
+        self._watch_waveform_controls()
         self.refresh_waveform()
 
     def _build_ui(self) -> None:
@@ -323,18 +360,25 @@ class SfxDesigner:
         toolbar.grid(row=0, column=0, sticky="ew")
         toolbar.columnconfigure(5, weight=1)
 
+        self.category_var = tk.StringVar(value="Custom")
         self.preset_var = tk.StringVar(value="Custom")
-        ttk.Label(toolbar, text="Preset").grid(row=0, column=0, padx=(0, 5))
-        preset_box = ttk.Combobox(toolbar, textvariable=self.preset_var, values=list(PRESETS), state="readonly", width=20)
-        preset_box.grid(row=0, column=1, padx=(0, 10))
+        ttk.Label(toolbar, text="Category").grid(row=0, column=0, padx=(0, 5))
+        category_box = ttk.Combobox(toolbar, textvariable=self.category_var, values=list(PRESET_CATEGORIES), state="readonly", width=13)
+        category_box.grid(row=0, column=1, padx=(0, 6))
+        category_box.bind("<<ComboboxSelected>>", lambda _event: self.update_preset_choices())
+        ttk.Label(toolbar, text="Preset").grid(row=0, column=2, padx=(0, 5))
+        self.preset_box = ttk.Combobox(toolbar, textvariable=self.preset_var, values=PRESET_CATEGORIES["Custom"], state="readonly", width=20)
+        preset_box = self.preset_box
+        preset_box.grid(row=0, column=3, padx=(0, 10))
         preset_box.bind("<<ComboboxSelected>>", lambda _event: self.apply_preset())
-        ttk.Button(toolbar, text="New", command=self.new_project).grid(row=0, column=2, padx=3)
-        ttk.Button(toolbar, text="Open Project", command=self.open_project).grid(row=0, column=3, padx=3)
-        ttk.Button(toolbar, text="Save Project", command=self.save_project).grid(row=0, column=4, padx=3)
-        ttk.Button(toolbar, text="Preview", command=self.preview).grid(row=0, column=6, padx=3)
-        ttk.Button(toolbar, text="Stop", command=self.stop_preview).grid(row=0, column=7, padx=3)
-        ttk.Button(toolbar, text="Export WAV", command=self.export_wav).grid(row=0, column=8, padx=3)
-        ttk.Button(toolbar, text="Export Variations", command=self.export_variations).grid(row=0, column=9, padx=3)
+        ttk.Button(toolbar, text="New", command=self.new_project).grid(row=0, column=4, padx=3)
+        ttk.Button(toolbar, text="Open Project", command=self.open_project).grid(row=0, column=5, padx=3)
+        ttk.Button(toolbar, text="Save Project", command=self.save_project).grid(row=0, column=6, padx=3)
+        ttk.Button(toolbar, text="Preview", command=self.preview).grid(row=0, column=7, padx=3)
+        ttk.Button(toolbar, text="Stop", command=self.stop_preview).grid(row=0, column=8, padx=3)
+        ttk.Button(toolbar, text="Export WAV", command=self.export_wav).grid(row=0, column=9, padx=3)
+        ttk.Button(toolbar, text="Export Variations", command=self.export_variations).grid(row=0, column=10, padx=3)
+        ttk.Button(toolbar, text="Export Unity Pack", command=self.export_pack).grid(row=0, column=11, padx=3)
 
         content = ttk.Panedwindow(self.root, orient=tk.HORIZONTAL)
         content.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
@@ -348,6 +392,10 @@ class SfxDesigner:
         self.canvas = tk.Canvas(preview, height=240, background="#10131a", highlightthickness=0)
         self.canvas.pack(fill="x", pady=(8, 12))
         self.canvas.bind("<Configure>", lambda _event: self.refresh_waveform())
+        ttk.Label(preview, text="Frequency spectrum", font=("Segoe UI", 11, "bold")).pack(anchor="w")
+        self.spectrum_canvas = tk.Canvas(preview, height=145, background="#10131a", highlightthickness=0)
+        self.spectrum_canvas.pack(fill="x", pady=(8, 12))
+        self.spectrum_canvas.bind("<Configure>", lambda _event: self.refresh_waveform())
         ttk.Label(preview, text="Output is 16-bit mono PCM WAV. Unity imports it directly as an AudioClip.", wraplength=330).pack(anchor="w")
         self.status = tk.StringVar(value="Ready")
         ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor="w", padding=(8, 4)).grid(row=2, column=0, sticky="ew")
@@ -437,7 +485,11 @@ class SfxDesigner:
 
     def _load_state_into_ui(self, raw_state: dict[str, Any]) -> None:
         state = validate_state(raw_state)
-        self.preset_var.set(state.get("preset", "Custom"))
+        preset = state.get("preset", "Custom")
+        category = next((name for name, presets in PRESET_CATEGORIES.items() if preset in presets), "Custom")
+        self.category_var.set(category)
+        self.update_preset_choices()
+        self.preset_var.set(preset if preset in PRESETS else "Custom")
         for key, variable in self.global_vars.items():
             if key in ("noise_enabled", "normalize"):
                 variable.set(state[key])
@@ -449,6 +501,23 @@ class SfxDesigner:
             for key, variable in variables.items():
                 variable.set(layer_state[key] if key == "enabled" else str(layer_state[key]))
         self.state = state
+
+    def update_preset_choices(self) -> None:
+        choices = PRESET_CATEGORIES[self.category_var.get()]
+        self.preset_box.configure(values=choices)
+        self.preset_var.set(choices[0])
+
+    def _watch_waveform_controls(self) -> None:
+        for variable in self.global_vars.values():
+            variable.trace_add("write", self._schedule_waveform_refresh)
+        for layer in self.layer_vars:
+            for variable in layer.values():
+                variable.trace_add("write", self._schedule_waveform_refresh)
+
+    def _schedule_waveform_refresh(self, *_arguments: Any) -> None:
+        if self._waveform_job is not None:
+            self.root.after_cancel(self._waveform_job)
+        self._waveform_job = self.root.after(250, self.refresh_waveform)
 
     def _generate(self) -> tuple[list[float], dict[str, Any]]:
         state = self._state_from_ui()
@@ -464,6 +533,7 @@ class SfxDesigner:
         except (ValueError, OverflowError) as error:
             self.status.set(str(error))
             return
+        self._waveform_job = None
         canvas = self.canvas
         canvas.delete("all")
         width, height = max(10, canvas.winfo_width()), max(10, canvas.winfo_height())
@@ -478,7 +548,29 @@ class SfxDesigner:
             points.extend((pixel, middle - value * (height * 0.42)))
         if len(points) >= 4:
             canvas.create_line(*points, fill="#63c5ff", width=1.4, smooth=True)
+        self._draw_spectrum(samples)
         self.status.set(f"Generated {len(samples):,} samples at {_state['sample_rate']:,} Hz")
+
+    def _draw_spectrum(self, samples: list[float]) -> None:
+        canvas = self.spectrum_canvas
+        canvas.delete("all")
+        width, height = max(10, canvas.winfo_width()), max(10, canvas.winfo_height())
+        window = samples[:min(1024, len(samples))]
+        if not window:
+            return
+        bins = 40
+        magnitudes: list[float] = []
+        for bin_index in range(bins):
+            frequency_bin = bin_index + 1
+            real = sum(value * math.cos(math.tau * frequency_bin * index / len(window)) for index, value in enumerate(window))
+            imaginary = sum(value * math.sin(math.tau * frequency_bin * index / len(window)) for index, value in enumerate(window))
+            magnitudes.append(math.sqrt(real * real + imaginary * imaginary) / len(window))
+        peak = max(magnitudes, default=1.0) or 1.0
+        bar_width = width / bins
+        for index, magnitude in enumerate(magnitudes):
+            bar_height = (magnitude / peak) * (height - 14)
+            x0 = index * bar_width + 1
+            canvas.create_rectangle(x0, height - bar_height - 1, x0 + bar_width - 2, height - 1, fill="#7ee787", outline="")
 
     def apply_preset(self) -> None:
         self._load_state_into_ui(copy.deepcopy(PRESETS[self.preset_var.get()]))
@@ -547,6 +639,21 @@ class SfxDesigner:
                 write_wav(Path(destination) / f"{normalized['name']}.wav", samples, normalized["sample_rate"])
             self.status.set(f"Exported {count} deterministic variations to {Path(destination).name}")
             messagebox.showinfo(APP_TITLE, f"Exported {count} Unity-ready WAV variations.")
+        except (ValueError, OSError, OverflowError) as error:
+            messagebox.showerror(APP_TITLE, str(error))
+
+    def export_pack(self) -> None:
+        try:
+            source = self._state_from_ui()
+            count = simpledialog.askinteger(APP_TITLE, "How many WAVs in this Unity Pack?", parent=self.root, initialvalue=1, minvalue=1, maxvalue=50)
+            if count is None:
+                return
+            destination = filedialog.askdirectory(title="Choose a folder for the Unity Pack")
+            if not destination:
+                return
+            output_paths = export_unity_pack(destination, source, count)
+            self.status.set(f"Exported Unity Pack: {len(output_paths) - 1} WAV(s) plus recipe JSON")
+            messagebox.showinfo(APP_TITLE, f"Exported {len(output_paths) - 1} Unity-ready WAV(s) and an editable .sfx.json recipe.")
         except (ValueError, OSError, OverflowError) as error:
             messagebox.showerror(APP_TITLE, str(error))
 
@@ -623,6 +730,13 @@ def run_self_test() -> int:
     if generate_samples(variation_a)[0] != generate_samples(variation_b)[0]:
         failures.append("Batch variation generation is not deterministic")
 
+    with tempfile.TemporaryDirectory(prefix="sfx_designer_pack_") as folder:
+        output_paths = export_unity_pack(folder, PRESETS["Pickup"], 3)
+        if len(output_paths) != 4 or not all(path.exists() for path in output_paths):
+            failures.append("Unity Pack export did not write recipe and variations")
+        elif json.loads(output_paths[0].read_text(encoding="utf-8"))["name"] != "Pickup":
+            failures.append("Unity Pack recipe did not preserve editable state")
+
     with tempfile.TemporaryDirectory(prefix="sfx_designer_test_") as folder:
         for name, preset in PRESETS.items():
             samples, state = generate_samples(copy.deepcopy(preset))
@@ -638,7 +752,7 @@ def run_self_test() -> int:
     if failures:
         print("Self-test failed:\n" + "\n".join(failures))
         return 1
-    print(f"Self-test passed: {len(PRESETS)} presets exported as 44.1 kHz 16-bit mono WAV; deterministic, variation, waveform, silence, and input-clamping checks passed.")
+    print(f"Self-test passed: {len(PRESETS)} presets exported as 44.1 kHz 16-bit mono WAV; deterministic, variation, waveform, Unity Pack, silence, and input-clamping checks passed.")
     return 0
 
 
