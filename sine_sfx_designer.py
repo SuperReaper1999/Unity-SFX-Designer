@@ -402,12 +402,15 @@ class SfxDesigner:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title(APP_TITLE)
-        self.root.minsize(1120, 720)
+        self.root.minsize(1320, 860)
         self.state = default_state()
         self.preview_file: str | None = None
         self._waveform_job: str | None = None
         self.global_vars: dict[str, Any] = {}
         self.layer_vars: list[dict[str, Any]] = []
+        self.selected_layer_var = tk.IntVar(value=0)
+        self.quick_layer_scales: dict[str, tk.Scale] = {}
+        self.quick_layer_values: dict[str, tk.StringVar] = {}
         self._build_ui()
         self._load_state_into_ui(self.state)
         self._watch_waveform_controls()
@@ -460,6 +463,17 @@ class SfxDesigner:
         self.status = tk.StringVar(value="Ready")
         ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor="w", padding=(8, 4)).grid(row=2, column=0, sticky="ew")
 
+    def _add_quick_slider(self, parent: ttk.Frame, row: int, column: int, label: str, key: str, minimum: float, maximum: float, resolution: float) -> None:
+        ttk.Label(parent, text=label).grid(row=row, column=column, sticky="w", padx=(0, 4), pady=2)
+        slider = tk.Scale(parent, from_=minimum, to=maximum, orient=tk.HORIZONTAL, resolution=resolution, showvalue=False, length=128,
+                          command=lambda value, field=key: self.global_vars[field].set(f"{float(value):.4g}"))
+        slider.grid(row=row, column=column + 1, sticky="ew", padx=(0, 4), pady=2)
+        ttk.Entry(parent, textvariable=self.global_vars[key], width=7).grid(row=row, column=column + 2, sticky="w", padx=(0, 10), pady=2)
+        try:
+            slider.set(float(self.global_vars[key].get()))
+        except ValueError:
+            slider.set(minimum)
+
     def _add_field(self, parent: ttk.Frame, row: int, column: int, label: str, key: str, default: Any, width: int = 9) -> None:
         variable = tk.StringVar(value=str(default))
         self.global_vars[key] = variable
@@ -478,8 +492,8 @@ class SfxDesigner:
         self.global_vars["sample_rate"] = tk.StringVar(value=str(DEFAULT_SAMPLE_RATE))
         ttk.Combobox(global_frame, textvariable=self.global_vars["sample_rate"], values=(22050, 44100, 48000), state="readonly", width=13).grid(row=1, column=1, sticky="w", padx=(0, 10), pady=2)
         self.global_vars["normalize"] = tk.BooleanVar(value=True)
-        ttk.Checkbutton(global_frame, text="Normalize", variable=self.global_vars["normalize"]).grid(row=1, column=2, sticky="w", pady=2)
-        ttk.Button(global_frame, text="Refresh waveform", command=self.refresh_waveform).grid(row=1, column=4, columnspan=2, sticky="w", pady=2)
+        ttk.Checkbutton(global_frame, text="Normalize", variable=self.global_vars["normalize"]).grid(row=1, column=4, sticky="w", pady=2)
+        ttk.Button(global_frame, text="Refresh waveform", command=self.refresh_waveform).grid(row=1, column=5, sticky="w", pady=2)
 
         envelope_frame = ttk.LabelFrame(parent, text="Master envelope (ADSR)", padding=8)
         envelope_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
@@ -503,8 +517,19 @@ class SfxDesigner:
         self._add_field(effects_frame, 2, 0, "Delay mix", "delay_mix", 0.0)
         self._add_field(effects_frame, 2, 2, "Reverb mix", "reverb_mix", 0.0)
 
+        quick_global_frame = ttk.LabelFrame(parent, text="Quick global sliders", padding=8)
+        quick_global_frame.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        quick_global_frame.columnconfigure(1, weight=1)
+        quick_global_frame.columnconfigure(4, weight=1)
+        self._add_quick_slider(quick_global_frame, 0, 0, "Duration", "duration", 0.01, MAX_DURATION_SECONDS, 0.01)
+        self._add_quick_slider(quick_global_frame, 0, 3, "Master", "master_gain", 0.0, 1.5, 0.01)
+        self._add_quick_slider(quick_global_frame, 1, 0, "Attack", "attack", 0.0, 1.0, 0.01)
+        self._add_quick_slider(quick_global_frame, 1, 3, "Release", "release", 0.0, 2.0, 0.01)
+        self._add_quick_slider(quick_global_frame, 2, 0, "Distortion", "distortion", 0.0, 1.0, 0.01)
+        self._add_quick_slider(quick_global_frame, 2, 3, "Reverb", "reverb_mix", 0.0, 1.0, 0.01)
+
         layers_frame = ttk.LabelFrame(parent, text="Oscillator layers", padding=8)
-        layers_frame.grid(row=3, column=0, sticky="nsew")
+        layers_frame.grid(row=4, column=0, sticky="nsew")
         headers = ("On", "Wave", "Frequency", "Gain", "Phase°", "Sweep start", "Sweep end", "Start", "End")
         for column, title in enumerate(headers):
             ttk.Label(layers_frame, text=title, font=("Segoe UI", 9, "bold")).grid(row=0, column=column, padx=3, pady=(0, 4), sticky="w")
@@ -522,7 +547,7 @@ class SfxDesigner:
             self.layer_vars.append(values)
 
         shaping_frame = ttk.LabelFrame(parent, text="Per-layer modulation and envelope", padding=8)
-        shaping_frame.grid(row=4, column=0, sticky="ew", pady=(8, 0))
+        shaping_frame.grid(row=5, column=0, sticky="ew", pady=(8, 0))
         headers = ("FM Hz", "FM depth Hz", "LFO Hz", "LFO depth", "Attack", "Decay", "Sustain", "Release")
         for column, title in enumerate(headers):
             ttk.Label(shaping_frame, text=title, font=("Segoe UI", 9, "bold")).grid(row=0, column=column + 1, padx=3, pady=(0, 4), sticky="w")
@@ -534,6 +559,50 @@ class SfxDesigner:
             ):
                 values[key] = tk.StringVar(value=str(default))
                 ttk.Entry(shaping_frame, textvariable=values[key], width=9).grid(row=index + 1, column=column, padx=3, pady=2)
+
+        quick_layer_frame = ttk.LabelFrame(parent, text="Quick selected-layer sliders", padding=8)
+        quick_layer_frame.grid(row=6, column=0, sticky="ew", pady=(8, 0))
+        for index in range(4):
+            ttk.Radiobutton(quick_layer_frame, text=f"Layer {index + 1}", variable=self.selected_layer_var, value=index,
+                            command=self._refresh_quick_layer_sliders).grid(row=0, column=index, padx=(0, 8), sticky="w")
+        for row, (label, key, minimum, maximum, resolution, logarithmic) in enumerate((
+            ("Frequency", "frequency", 20.0, 20000.0, 0.001, True),
+            ("Gain", "gain", 0.0, 2.0, 0.01, False),
+            ("FM depth", "fm_depth_hz", 0.0, 2000.0, 1.0, False),
+            ("LFO depth", "lfo_depth", 0.0, 1.0, 0.01, False),
+        ), start=1):
+            ttk.Label(quick_layer_frame, text=label).grid(row=row, column=0, sticky="w", padx=(0, 4), pady=2)
+            slider = tk.Scale(quick_layer_frame, from_=0.0 if logarithmic else minimum, to=1.0 if logarithmic else maximum,
+                              orient=tk.HORIZONTAL, resolution=resolution, showvalue=False, length=190,
+                              command=lambda value, field=key, is_log=logarithmic: self._set_selected_layer_from_slider(field, float(value), is_log))
+            slider.grid(row=row, column=1, columnspan=2, sticky="ew", padx=(0, 4), pady=2)
+            value_var = tk.StringVar()
+            self.quick_layer_scales[key] = slider
+            self.quick_layer_values[key] = value_var
+            ttk.Label(quick_layer_frame, textvariable=value_var, width=10).grid(row=row, column=3, sticky="w", pady=2)
+        self._refresh_quick_layer_sliders()
+
+    def _set_selected_layer_from_slider(self, key: str, value: float, logarithmic: bool) -> None:
+        if logarithmic:
+            value = 20.0 * (1000.0 ** value)
+        variable = self.layer_vars[self.selected_layer_var.get()][key]
+        variable.set(f"{value:.4g}")
+        self.quick_layer_values[key].set(f"{value:.3g}")
+
+    def _refresh_quick_layer_sliders(self) -> None:
+        if not self.layer_vars:
+            return
+        layer = self.layer_vars[self.selected_layer_var.get()]
+        for key, slider in self.quick_layer_scales.items():
+            try:
+                value = float(layer[key].get())
+            except ValueError:
+                value = 0.0
+            if key == "frequency":
+                slider.set(clamp(math.log(max(20.0, value) / 20.0, 1000.0), 0.0, 1.0))
+            else:
+                slider.set(value)
+            self.quick_layer_values[key].set(f"{value:.3g}")
 
     @staticmethod
     def _number(variable: tk.StringVar, label: str) -> float:
@@ -582,6 +651,7 @@ class SfxDesigner:
             for key, variable in variables.items():
                 variable.set(layer_state[key] if key == "enabled" else str(layer_state[key]))
         self.state = state
+        self._refresh_quick_layer_sliders()
 
     def update_preset_choices(self) -> None:
         choices = PRESET_CATEGORIES[self.category_var.get()]

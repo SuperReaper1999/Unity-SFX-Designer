@@ -33,6 +33,8 @@ That command should open a small Tk demo window. If it reports an `init.tcl` or 
 
 Each of the four layers has its own sine, square, triangle, or sawtooth oscillator, frequency, gain, phase, pitch sweep, active start/end time, FM modulation, amplitude LFO, and ADSR envelope. This allows a sharp transient layer to sit above a sustained body or tail.
 
+Use the **Quick global sliders** for fast shaping and the **Quick selected-layer sliders** for frequency, gain, FM depth, and LFO depth. Numeric fields remain available alongside them for exact values; the frequency slider uses a logarithmic scale so low and high frequencies are both practical to adjust.
+
 The master effects panel includes deterministic white or pink noise, low-pass filtering, soft distortion, feedback delay, and a compact multi-tap reverb. All controls default to neutral values, so existing projects keep their previous sound.
 
 ## Variations
