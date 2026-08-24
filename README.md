@@ -45,6 +45,12 @@ The Realism tab adds 4× oversampled rendering, white/pink/brown/band-limited no
 
 The preset browser keeps the built-in library out of the way of the design controls while making it quick to reuse. Filter by category, type part of a preset or category name, and use **Add favourite** for frequently used sounds. Favourites are stored locally in your Windows app-data folder, so updating the tool does not alter your project files or Git working tree.
 
+## Piano roll
+
+The **Piano** tab turns the current sound design into a simple game-music instrument. Click cells in the 16th-note grid to add notes, set the BPM, choose an 8-, 16-, or 32-step loop, then preview or export the complete loop as a Unity-ready WAV. The included **Load minor loop** button provides an editable starting phrase.
+
+Music notes, tempo, and loop length are saved in normal project JSON files alongside the synth settings. This is deliberately a compact sequencer for loops, stings, and menu music—not a replacement for a full DAW. Exported music remains mono to suit Unity positional or UI playback; use the same project’s effects controls to shape the instrument and room tail.
+
 ## Variations
 
 Use **Export Variations** to build 2–50 related WAVs from the current design. The **Variation %** setting controls how much pitch, gain, timing, sweep, phase, and noise seed differ. This is ideal for avoiding repetitive footsteps, impacts, gunshot layers, and zombie sounds while keeping a coherent sound family.
