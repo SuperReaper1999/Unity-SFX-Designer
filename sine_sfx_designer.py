@@ -561,6 +561,7 @@ class SfxDesigner:
         self.music_vars: dict[str, tk.StringVar] = {}
         self.music_track_vars: list[dict[str, Any]] = []
         self.selected_music_track_var = tk.IntVar(value=0)
+        self.piano_waveform_var = tk.StringVar(value="sine")
         self._piano_drag_start: tuple[int, int] | None = None
         self.piano_canvas: tk.Canvas | None = None
         self._build_ui()
@@ -905,32 +906,41 @@ class SfxDesigner:
         steps = ttk.Combobox(controls, textvariable=self.music_vars["music_steps"], values=(8, 16, 32), state="readonly", width=6)
         steps.grid(row=0, column=3, sticky="w", padx=(0, 12))
         steps.bind("<<ComboboxSelected>>", lambda _event: self._change_music_steps())
+        ttk.Label(controls, text="Current-design wave").grid(row=1, column=0, sticky="w", padx=(0, 4), pady=(6, 0))
+        quick_wave = ttk.Combobox(controls, textvariable=self.piano_waveform_var,
+                                  values=("sine", "square", "triangle", "sawtooth"), state="readonly", width=10)
+        quick_wave.grid(row=1, column=1, sticky="w", padx=(0, 12), pady=(6, 0))
+        quick_wave.bind("<<ComboboxSelected>>", lambda _event: self.apply_piano_waveform())
+        ttk.Label(controls, text="Applies to enabled layers used by Custom tracks.").grid(row=1, column=2, columnspan=4, sticky="w", pady=(6, 0))
         track_frame = ttk.LabelFrame(parent, text="Tracks", padding=8)
         track_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
-        ttk.Label(track_frame, text="Use", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, padx=3)
-        ttk.Label(track_frame, text="Name", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, padx=3, sticky="w")
-        ttk.Label(track_frame, text="Instrument", font=("Segoe UI", 9, "bold")).grid(row=0, column=2, padx=3, sticky="w")
-        ttk.Label(track_frame, text="Volume", font=("Segoe UI", 9, "bold")).grid(row=0, column=3, padx=3, sticky="w")
-        ttk.Label(track_frame, text="Mute", font=("Segoe UI", 9, "bold")).grid(row=0, column=4, padx=3)
+        ttk.Label(track_frame, text="Edit", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, padx=3)
+        ttk.Label(track_frame, text="Show", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, padx=3)
+        ttk.Label(track_frame, text="Name", font=("Segoe UI", 9, "bold")).grid(row=0, column=2, padx=3, sticky="w")
+        ttk.Label(track_frame, text="Instrument", font=("Segoe UI", 9, "bold")).grid(row=0, column=3, padx=3, sticky="w")
+        ttk.Label(track_frame, text="Volume", font=("Segoe UI", 9, "bold")).grid(row=0, column=4, padx=3, sticky="w")
+        ttk.Label(track_frame, text="Mute", font=("Segoe UI", 9, "bold")).grid(row=0, column=5, padx=3)
         for index in range(MUSIC_TRACK_COUNT):
             values: dict[str, Any] = {
                 "name": tk.StringVar(value=f"Track {index + 1}"),
                 "preset": tk.StringVar(value="Custom"),
                 "volume": tk.StringVar(value="0.8"),
                 "muted": tk.BooleanVar(value=False),
+                "visible": tk.BooleanVar(value=True),
                 "notes": [],
             }
             ttk.Radiobutton(track_frame, variable=self.selected_music_track_var, value=index, command=self.draw_piano_roll).grid(row=index + 1, column=0, padx=3)
-            ttk.Entry(track_frame, textvariable=values["name"], width=15).grid(row=index + 1, column=1, padx=3, pady=2, sticky="ew")
-            ttk.Combobox(track_frame, textvariable=values["preset"], values=tuple(PRESETS), state="readonly", width=20).grid(row=index + 1, column=2, padx=3, pady=2, sticky="ew")
-            ttk.Spinbox(track_frame, from_=0, to=2, increment=.05, textvariable=values["volume"], width=7).grid(row=index + 1, column=3, padx=3, pady=2)
-            ttk.Checkbutton(track_frame, variable=values["muted"]).grid(row=index + 1, column=4, padx=3)
+            ttk.Checkbutton(track_frame, variable=values["visible"], command=self.draw_piano_roll).grid(row=index + 1, column=1, padx=3)
+            ttk.Entry(track_frame, textvariable=values["name"], width=15).grid(row=index + 1, column=2, padx=3, pady=2, sticky="ew")
+            ttk.Combobox(track_frame, textvariable=values["preset"], values=tuple(PRESETS), state="readonly", width=20).grid(row=index + 1, column=3, padx=3, pady=2, sticky="ew")
+            ttk.Spinbox(track_frame, from_=0, to=2, increment=.05, textvariable=values["volume"], width=7).grid(row=index + 1, column=4, padx=3, pady=2)
+            ttk.Checkbutton(track_frame, variable=values["muted"]).grid(row=index + 1, column=5, padx=3)
             self.music_track_vars.append(values)
         ttk.Button(controls, text="Clear", command=self.clear_music_notes).grid(row=0, column=4, padx=(0, 6))
         ttk.Button(controls, text="Load minor loop", command=self.load_minor_loop).grid(row=0, column=5, padx=(0, 6))
         ttk.Button(controls, text="Preview song", command=self.preview_music).grid(row=0, column=6, padx=(0, 6))
         ttk.Button(controls, text="Export song WAV", command=self.export_music).grid(row=0, column=7)
-        ttk.Label(parent, text="Select a track, then click to add/remove notes or drag across cells to set note length. Each track can use the current design or a built-in instrument preset.", wraplength=780).grid(row=2, column=0, sticky="w", pady=(0, 6))
+        ttk.Label(parent, text="Use Edit to choose the track you are changing; tick Show on any tracks you want overlaid. Click to add/remove notes or drag across cells to set note length.", wraplength=780).grid(row=2, column=0, sticky="w", pady=(0, 6))
         self.piano_canvas = tk.Canvas(parent, height=432, background="#10131a", highlightthickness=0)
         self.piano_canvas.grid(row=3, column=0, sticky="ew")
         self.piano_canvas.bind("<ButtonPress-1>", self._begin_piano_note)
@@ -951,6 +961,13 @@ class SfxDesigner:
 
     def _selected_music_track(self) -> dict[str, Any]:
         return self.music_track_vars[self.selected_music_track_var.get()]
+
+    def apply_piano_waveform(self) -> None:
+        waveform = self.piano_waveform_var.get()
+        for layer in self.layer_vars:
+            if layer["enabled"].get():
+                layer["waveform"].set(waveform)
+        self.status.set(f"Current-design instrument set to {waveform} wave")
 
     def _piano_cell_at(self, event: tk.Event) -> tuple[int, int] | None:
         if self.piano_canvas is None or event.x < 48:
@@ -973,8 +990,14 @@ class SfxDesigner:
         row_count = PIANO_HIGH_MIDI - PIANO_LOW_MIDI + 1
         cell_width = max(1, (width - label_width) / steps)
         cell_height = height / row_count
-        active = {(note["step"], note["midi"]): note for note in self._selected_music_track()["notes"]}
+        active: dict[tuple[int, int], list[tuple[dict[str, Any], int]]] = {}
+        for track_index, track in enumerate(self.music_track_vars):
+            if not track["visible"].get():
+                continue
+            for note in track["notes"]:
+                active.setdefault((note["step"], note["midi"]), []).append((note, track_index))
         black_keys = {1, 3, 6, 8, 10}
+        track_colours = ("#63c5ff", "#f0b35f", "#b884f5", "#72d394")
         for row, midi in enumerate(range(PIANO_HIGH_MIDI, PIANO_LOW_MIDI - 1, -1)):
             y0, y1 = row * cell_height, (row + 1) * cell_height
             base = "#1b2130" if midi % 12 in black_keys else "#252d3d"
@@ -985,10 +1008,12 @@ class SfxDesigner:
                 x0, x1 = label_width + step * cell_width, label_width + (step + 1) * cell_width
                 colour = "#315888" if step % 4 == 0 else base
                 canvas.create_rectangle(x0, y0, x1, y1, fill=colour, outline="#354054")
-                note = active.get((step, midi))
-                if note:
+                notes = active.get((step, midi), [])
+                for note, track_index in notes:
                     end = min(steps, step + note["length"])
-                    canvas.create_rectangle(x0 + 2, y0 + 2, label_width + end * cell_width - 2, y1 - 2, fill="#63c5ff", outline="")
+                    is_edit_track = track_index == self.selected_music_track_var.get()
+                    canvas.create_rectangle(x0 + 2, y0 + 2, label_width + end * cell_width - 2, y1 - 2,
+                                            fill=track_colours[track_index], outline="#ffffff" if is_edit_track else "")
 
     def _begin_piano_note(self, event: tk.Event) -> None:
         self._piano_drag_start = self._piano_cell_at(event)
@@ -1123,6 +1148,8 @@ class SfxDesigner:
             variables["volume"].set(str(track_state["volume"]))
             variables["muted"].set(track_state["muted"])
             variables["notes"] = copy.deepcopy(track_state["notes"])
+        if self.layer_vars:
+            self.piano_waveform_var.set(self.layer_vars[0]["waveform"].get())
         self.state = state
         self._refresh_quick_layer_sliders()
         self._refresh_preset_browser()
