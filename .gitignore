@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *.wav
 *.json
+!Showcase/Audio/
+!Showcase/Audio/*.wav
+!Showcase/Audio/*.sfx.json

@@ -1,0 +1,281 @@
+{
+  "version": 2,
+  "name": "Safehouse_Morning",
+  "duration": 0.75,
+  "sample_rate": 44100,
+  "master_gain": 0.8,
+  "variation_amount": 0.12,
+  "attack": 0.01,
+  "decay": 0.08,
+  "sustain": 0.7,
+  "release": 0.16,
+  "noise_enabled": false,
+  "noise_color": "white",
+  "noise_gain": 0.0,
+  "noise_seed": 1337,
+  "lowpass_hz": 0.0,
+  "distortion": 0.0,
+  "delay_time": 0.08,
+  "delay_feedback": 0.22,
+  "delay_mix": 0.15,
+  "reverb_mix": 0.0,
+  "render_quality": "high",
+  "filter_mode": "lowpass",
+  "filter_cutoff_hz": 0.0,
+  "filter_resonance": 0.0,
+  "filter_envelope_amount": 0.0,
+  "transient_gain": 0.0,
+  "transient_decay": 0.025,
+  "pitch_drift_hz": 0.0,
+  "pitch_jitter_hz": 0.0,
+  "formant_low_hz": 0.0,
+  "formant_high_hz": 0.0,
+  "normalize": true,
+  "preset": "Custom",
+  "music_tempo_bpm": 108,
+  "music_steps": 16,
+  "music_notes": [
+    {
+      "step": 0,
+      "midi": 60,
+      "length": 1,
+      "velocity": 0.9
+    },
+    {
+      "step": 2,
+      "midi": 64,
+      "length": 1,
+      "velocity": 0.75
+    },
+    {
+      "step": 4,
+      "midi": 67,
+      "length": 1,
+      "velocity": 0.85
+    },
+    {
+      "step": 6,
+      "midi": 64,
+      "length": 1,
+      "velocity": 0.7
+    },
+    {
+      "step": 8,
+      "midi": 62,
+      "length": 1,
+      "velocity": 0.9
+    },
+    {
+      "step": 10,
+      "midi": 65,
+      "length": 1,
+      "velocity": 0.75
+    },
+    {
+      "step": 12,
+      "midi": 69,
+      "length": 1,
+      "velocity": 0.85
+    },
+    {
+      "step": 14,
+      "midi": 65,
+      "length": 1,
+      "velocity": 0.7
+    }
+  ],
+  "music_tracks": [
+    {
+      "name": "Pluck",
+      "preset": "Pickup",
+      "volume": 1.0,
+      "muted": false,
+      "notes": [
+        {
+          "step": 0,
+          "midi": 60,
+          "length": 1,
+          "velocity": 0.9
+        },
+        {
+          "step": 2,
+          "midi": 64,
+          "length": 1,
+          "velocity": 0.75
+        },
+        {
+          "step": 4,
+          "midi": 67,
+          "length": 1,
+          "velocity": 0.85
+        },
+        {
+          "step": 6,
+          "midi": 64,
+          "length": 1,
+          "velocity": 0.7
+        },
+        {
+          "step": 8,
+          "midi": 62,
+          "length": 1,
+          "velocity": 0.9
+        },
+        {
+          "step": 10,
+          "midi": 65,
+          "length": 1,
+          "velocity": 0.75
+        },
+        {
+          "step": 12,
+          "midi": 69,
+          "length": 1,
+          "velocity": 0.85
+        },
+        {
+          "step": 14,
+          "midi": 65,
+          "length": 1,
+          "velocity": 0.7
+        }
+      ]
+    },
+    {
+      "name": "Warmth",
+      "preset": "Ambient Hum",
+      "volume": 1.25,
+      "muted": false,
+      "notes": [
+        {
+          "step": 0,
+          "midi": 48,
+          "length": 8,
+          "velocity": 0.65
+        },
+        {
+          "step": 0,
+          "midi": 55,
+          "length": 8,
+          "velocity": 0.65
+        },
+        {
+          "step": 0,
+          "midi": 60,
+          "length": 8,
+          "velocity": 0.65
+        },
+        {
+          "step": 8,
+          "midi": 50,
+          "length": 8,
+          "velocity": 0.65
+        },
+        {
+          "step": 8,
+          "midi": 57,
+          "length": 8,
+          "velocity": 0.65
+        },
+        {
+          "step": 8,
+          "midi": 62,
+          "length": 8,
+          "velocity": 0.65
+        }
+      ]
+    },
+    {
+      "name": "Low Pulse",
+      "preset": "Custom",
+      "volume": 0.75,
+      "muted": false,
+      "notes": []
+    },
+    {
+      "name": "Unused",
+      "preset": "Custom",
+      "volume": 0.0,
+      "muted": false,
+      "notes": []
+    }
+  ],
+  "layers": [
+    {
+      "enabled": true,
+      "frequency": 440.0,
+      "gain": 0.25,
+      "phase_degrees": 0.0,
+      "sweep_start": 0.0,
+      "sweep_end": 0.0,
+      "start_time": 0.0,
+      "end_time": 0.75,
+      "fm_frequency": 0.0,
+      "fm_depth_hz": 0.0,
+      "lfo_frequency": 0.0,
+      "lfo_depth": 0.0,
+      "attack": 0.0,
+      "decay": 0.0,
+      "sustain": 1.0,
+      "release": 0.0,
+      "waveform": "sine"
+    },
+    {
+      "enabled": false,
+      "frequency": 440.0,
+      "gain": 0.25,
+      "phase_degrees": 0.0,
+      "sweep_start": 0.0,
+      "sweep_end": 0.0,
+      "start_time": 0.0,
+      "end_time": 0.75,
+      "fm_frequency": 0.0,
+      "fm_depth_hz": 0.0,
+      "lfo_frequency": 0.0,
+      "lfo_depth": 0.0,
+      "attack": 0.0,
+      "decay": 0.0,
+      "sustain": 1.0,
+      "release": 0.0,
+      "waveform": "sine"
+    },
+    {
+      "enabled": false,
+      "frequency": 440.0,
+      "gain": 0.25,
+      "phase_degrees": 0.0,
+      "sweep_start": 0.0,
+      "sweep_end": 0.0,
+      "start_time": 0.0,
+      "end_time": 0.75,
+      "fm_frequency": 0.0,
+      "fm_depth_hz": 0.0,
+      "lfo_frequency": 0.0,
+      "lfo_depth": 0.0,
+      "attack": 0.0,
+      "decay": 0.0,
+      "sustain": 1.0,
+      "release": 0.0,
+      "waveform": "sine"
+    },
+    {
+      "enabled": false,
+      "frequency": 440.0,
+      "gain": 0.25,
+      "phase_degrees": 0.0,
+      "sweep_start": 0.0,
+      "sweep_end": 0.0,
+      "start_time": 0.0,
+      "end_time": 0.75,
+      "fm_frequency": 0.0,
+      "fm_depth_hz": 0.0,
+      "lfo_frequency": 0.0,
+      "lfo_depth": 0.0,
+      "attack": 0.0,
+      "decay": 0.0,
+      "sustain": 1.0,
+      "release": 0.0,
+      "waveform": "sine"
+    }
+  ]
+}
