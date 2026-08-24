@@ -940,8 +940,9 @@ class SfxDesigner:
             self.music_track_vars.append(values)
         ttk.Button(controls, text="Clear", command=self.clear_music_notes).grid(row=0, column=4, padx=(0, 6))
         ttk.Button(controls, text="Load minor loop", command=self.load_minor_loop).grid(row=0, column=5, padx=(0, 6))
-        ttk.Button(controls, text="Preview song", command=self.preview_music).grid(row=0, column=6, padx=(0, 6))
-        ttk.Button(controls, text="Export song WAV", command=self.export_music).grid(row=0, column=7)
+        ttk.Button(controls, text="Load major loop", command=self.load_major_loop).grid(row=0, column=6, padx=(0, 6))
+        ttk.Button(controls, text="Preview song", command=self.preview_music).grid(row=0, column=7, padx=(0, 6))
+        ttk.Button(controls, text="Export song WAV", command=self.export_music).grid(row=0, column=8)
         ttk.Label(parent, text="Use Edit to choose the track you are changing; tick Show on any tracks you want overlaid. Click to add/remove notes or drag across cells to set note length.", wraplength=780).grid(row=2, column=0, sticky="w", pady=(0, 6))
         self.piano_canvas = tk.Canvas(parent, height=432, background="#10131a", highlightthickness=0)
         self.piano_canvas.grid(row=3, column=0, sticky="ew")
@@ -1050,16 +1051,22 @@ class SfxDesigner:
         self.status.set("Piano roll cleared")
 
     def load_minor_loop(self) -> None:
+        self._load_chord_loop(((57, 60, 64), (53, 57, 60), (55, 59, 62), (52, 55, 59)), "minor")
+
+    def load_major_loop(self) -> None:
+        self._load_chord_loop(((60, 64, 67), (55, 59, 62), (57, 60, 64), (53, 57, 60)), "major")
+
+    def _load_chord_loop(self, chords: tuple[tuple[int, ...], ...], label: str) -> None:
         steps = self._music_step_count()
-        note_length = max(1, steps // 8)
+        note_length = max(1, steps // (len(chords) * 2))
         selected_track = self._selected_music_track()
         selected_track["notes"] = [
-            {"step": (chord_index * steps) // 4, "midi": midi, "length": note_length, "velocity": 0.92}
-            for chord_index, chord in enumerate(((57, 60, 64), (53, 57, 60), (55, 59, 62), (52, 55, 59)))
+            {"step": (chord_index * steps) // len(chords), "midi": midi, "length": note_length, "velocity": 0.92}
+            for chord_index, chord in enumerate(chords)
             for midi in chord
         ]
         self.draw_piano_roll()
-        self.status.set(f"Loaded minor loop notes into {selected_track['name'].get()}")
+        self.status.set(f"Loaded {label} loop notes into {selected_track['name'].get()}")
 
     def _set_selected_layer_from_slider(self, key: str, value: float, logarithmic: bool) -> None:
         if logarithmic:
