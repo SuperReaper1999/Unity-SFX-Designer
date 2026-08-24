@@ -47,7 +47,7 @@ The preset browser keeps the built-in library out of the way of the design contr
 
 ## Piano roll
 
-The **Piano** tab turns the current sound design into a simple game-music instrument. Click cells in the 16th-note grid to add notes, set the BPM, choose an 8-, 16-, or 32-step loop, then preview or export the complete loop as a Unity-ready WAV. The included **Load minor loop** button provides an editable starting phrase.
+The **Piano** tab is a four-track game-music sequencer. Give each track a name, choose either the current design or a built-in preset as its instrument, adjust its volume, and mute it independently. Select a track, click cells in the 16th-note grid to add/remove notes, or drag across cells to set a note length. Set the BPM, choose an 8-, 16-, or 32-step loop, then preview or export the complete loop as a Unity-ready WAV. The included **Load minor loop** button provides an editable two-track starting phrase.
 
 Music notes, tempo, and loop length are saved in normal project JSON files alongside the synth settings. This is deliberately a compact sequencer for loops, stings, and menu music—not a replacement for a full DAW. Exported music remains mono to suit Unity positional or UI playback; use the same project’s effects controls to shape the instrument and room tail.
 

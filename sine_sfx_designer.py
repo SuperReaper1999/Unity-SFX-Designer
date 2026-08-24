@@ -40,6 +40,7 @@ DEFAULT_SAMPLE_RATE = 44100
 MAX_DURATION_SECONDS = 12.0
 PIANO_LOW_MIDI = 48   # C3
 PIANO_HIGH_MIDI = 71  # B4
+MUSIC_TRACK_COUNT = 4
 
 
 @dataclass
@@ -100,9 +101,17 @@ def default_state() -> dict[str, Any]:
         "preset": "Custom",
         "music_tempo_bpm": 120,
         "music_steps": 16,
-        "music_notes": [],
+        "music_notes": [],  # Kept in the recipe as a convenient Track 1 alias.
+        "music_tracks": default_music_tracks(),
         "layers": [asdict(Layer(enabled=index == 0)) for index in range(4)],
     }
+
+
+def default_music_tracks() -> list[dict[str, Any]]:
+    return [
+        {"name": f"Track {index + 1}", "preset": "Custom", "volume": 0.8, "muted": False, "notes": []}
+        for index in range(MUSIC_TRACK_COUNT)
+    ]
 
 
 def make_preset(preset_name: str, **changes: Any) -> dict[str, Any]:
@@ -251,19 +260,38 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     result["music_steps"] = int(result["music_steps"])
     if result["music_steps"] not in (8, 16, 32):
         result["music_steps"] = 16
-    result["music_notes"] = []
-    for raw_note in state.get("music_notes", []):
-        if not isinstance(raw_note, dict):
-            continue
-        try:
-            step = int(raw_note.get("step", 0))
-            midi = int(raw_note.get("midi", PIANO_LOW_MIDI))
-            length = int(raw_note.get("length", 1))
-            velocity = float(raw_note.get("velocity", 0.75))
-        except (TypeError, ValueError):
-            continue
-        if 0 <= step < result["music_steps"] and PIANO_LOW_MIDI <= midi <= PIANO_HIGH_MIDI:
-            result["music_notes"].append({"step": step, "midi": midi, "length": int(clamp(length, 1, result["music_steps"] - step)), "velocity": clamp(velocity, 0.05, 1.0)})
+    def validated_notes(raw_notes: Any) -> list[dict[str, Any]]:
+        notes: list[dict[str, Any]] = []
+        for raw_note in raw_notes if isinstance(raw_notes, list) else []:
+            if not isinstance(raw_note, dict):
+                continue
+            try:
+                step = int(raw_note.get("step", 0))
+                midi = int(raw_note.get("midi", PIANO_LOW_MIDI))
+                length = int(raw_note.get("length", 1))
+                velocity = float(raw_note.get("velocity", 0.75))
+            except (TypeError, ValueError):
+                continue
+            if 0 <= step < result["music_steps"] and PIANO_LOW_MIDI <= midi <= PIANO_HIGH_MIDI:
+                notes.append({"step": step, "midi": midi, "length": int(clamp(length, 1, result["music_steps"] - step)), "velocity": clamp(velocity, 0.05, 1.0)})
+        return notes
+
+    supplied_tracks = state.get("music_tracks")
+    if not isinstance(supplied_tracks, list):
+        supplied_tracks = [{"name": "Track 1", "preset": "Custom", "volume": 0.8, "muted": False, "notes": state.get("music_notes", [])}]
+    result["music_tracks"] = []
+    defaults = default_music_tracks()
+    for index, fallback in enumerate(defaults):
+        raw_track = supplied_tracks[index] if index < len(supplied_tracks) and isinstance(supplied_tracks[index], dict) else {}
+        preset = str(raw_track.get("preset", fallback["preset"]))
+        result["music_tracks"].append({
+            "name": str(raw_track.get("name", fallback["name"])).strip() or fallback["name"],
+            "preset": preset if preset in PRESETS else "Custom",
+            "volume": clamp(float(raw_track.get("volume", fallback["volume"])), 0.0, 2.0),
+            "muted": bool(raw_track.get("muted", False)),
+            "notes": validated_notes(raw_track.get("notes", [])),
+        })
+    result["music_notes"] = copy.deepcopy(result["music_tracks"][0]["notes"])
 
     supplied_layers = state.get("layers", [])
     result["layers"] = []
@@ -434,26 +462,32 @@ def generate_music_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict
     total_seconds = state["music_steps"] * step_seconds
     total_count = max(1, int(total_seconds * state["sample_rate"]))
     mix = np.zeros(total_count, dtype=np.float64)
-    for index, note in enumerate(state["music_notes"]):
-        note_seconds = min(total_seconds - note["step"] * step_seconds, note["length"] * step_seconds)
-        if note_seconds <= 0:
+    for track_index, track in enumerate(state["music_tracks"]):
+        if track["muted"]:
             continue
-        instrument = copy.deepcopy(state)
-        instrument["duration"] = note_seconds
-        instrument["normalize"] = False
-        instrument["master_gain"] = state["master_gain"] * note["velocity"]
-        instrument["noise_seed"] = state["noise_seed"] + index * 7919
-        ratio = midi_frequency(note["midi"]) / 440.0
-        for layer in instrument["layers"]:
-            layer["frequency"] *= ratio
-            layer["sweep_start"] *= ratio
-            layer["sweep_end"] *= ratio
-            layer["start_time"] = 0.0
-            layer["end_time"] = note_seconds
-        note_samples, _ = generate_samples(instrument)
-        start = int(note["step"] * step_seconds * state["sample_rate"])
-        end = min(total_count, start + len(note_samples))
-        mix[start:end] += np.asarray(note_samples[:end - start])
+        instrument_source = state if track["preset"] == "Custom" else PRESETS[track["preset"]]
+        for note_index, note in enumerate(track["notes"]):
+            note_seconds = min(total_seconds - note["step"] * step_seconds, note["length"] * step_seconds)
+            if note_seconds <= 0:
+                continue
+            instrument = copy.deepcopy(instrument_source)
+            instrument["sample_rate"] = state["sample_rate"]
+            instrument["render_quality"] = state["render_quality"]
+            instrument["duration"] = note_seconds
+            instrument["normalize"] = False
+            instrument["master_gain"] *= track["volume"] * note["velocity"]
+            instrument["noise_seed"] = state["noise_seed"] + track_index * 104729 + note_index * 7919
+            ratio = midi_frequency(note["midi"]) / 440.0
+            for layer in instrument["layers"]:
+                layer["frequency"] *= ratio
+                layer["sweep_start"] *= ratio
+                layer["sweep_end"] *= ratio
+                layer["start_time"] = 0.0
+                layer["end_time"] = note_seconds
+            note_samples, _ = generate_samples(instrument)
+            start = int(note["step"] * step_seconds * state["sample_rate"])
+            end = min(total_count, start + len(note_samples))
+            mix[start:end] += np.asarray(note_samples[:end - start])
     peak = float(np.max(np.abs(mix))) if len(mix) else 0.0
     if peak > 0.95:
         mix *= 0.95 / peak
@@ -525,7 +559,9 @@ class SfxDesigner:
         self.favourites_only_var = tk.BooleanVar(value=False)
         self.favorite_presets = self._load_favorite_presets()
         self.music_vars: dict[str, tk.StringVar] = {}
-        self.music_notes: list[dict[str, Any]] = []
+        self.music_track_vars: list[dict[str, Any]] = []
+        self.selected_music_track_var = tk.IntVar(value=0)
+        self._piano_drag_start: tuple[int, int] | None = None
         self.piano_canvas: tk.Canvas | None = None
         self._build_ui()
         self._load_state_into_ui(self.state)
@@ -869,14 +905,36 @@ class SfxDesigner:
         steps = ttk.Combobox(controls, textvariable=self.music_vars["music_steps"], values=(8, 16, 32), state="readonly", width=6)
         steps.grid(row=0, column=3, sticky="w", padx=(0, 12))
         steps.bind("<<ComboboxSelected>>", lambda _event: self._change_music_steps())
+        track_frame = ttk.LabelFrame(parent, text="Tracks", padding=8)
+        track_frame.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(track_frame, text="Use", font=("Segoe UI", 9, "bold")).grid(row=0, column=0, padx=3)
+        ttk.Label(track_frame, text="Name", font=("Segoe UI", 9, "bold")).grid(row=0, column=1, padx=3, sticky="w")
+        ttk.Label(track_frame, text="Instrument", font=("Segoe UI", 9, "bold")).grid(row=0, column=2, padx=3, sticky="w")
+        ttk.Label(track_frame, text="Volume", font=("Segoe UI", 9, "bold")).grid(row=0, column=3, padx=3, sticky="w")
+        ttk.Label(track_frame, text="Mute", font=("Segoe UI", 9, "bold")).grid(row=0, column=4, padx=3)
+        for index in range(MUSIC_TRACK_COUNT):
+            values: dict[str, Any] = {
+                "name": tk.StringVar(value=f"Track {index + 1}"),
+                "preset": tk.StringVar(value="Custom"),
+                "volume": tk.StringVar(value="0.8"),
+                "muted": tk.BooleanVar(value=False),
+                "notes": [],
+            }
+            ttk.Radiobutton(track_frame, variable=self.selected_music_track_var, value=index, command=self.draw_piano_roll).grid(row=index + 1, column=0, padx=3)
+            ttk.Entry(track_frame, textvariable=values["name"], width=15).grid(row=index + 1, column=1, padx=3, pady=2, sticky="ew")
+            ttk.Combobox(track_frame, textvariable=values["preset"], values=tuple(PRESETS), state="readonly", width=20).grid(row=index + 1, column=2, padx=3, pady=2, sticky="ew")
+            ttk.Spinbox(track_frame, from_=0, to=2, increment=.05, textvariable=values["volume"], width=7).grid(row=index + 1, column=3, padx=3, pady=2)
+            ttk.Checkbutton(track_frame, variable=values["muted"]).grid(row=index + 1, column=4, padx=3)
+            self.music_track_vars.append(values)
         ttk.Button(controls, text="Clear", command=self.clear_music_notes).grid(row=0, column=4, padx=(0, 6))
         ttk.Button(controls, text="Load minor loop", command=self.load_minor_loop).grid(row=0, column=5, padx=(0, 6))
         ttk.Button(controls, text="Preview song", command=self.preview_music).grid(row=0, column=6, padx=(0, 6))
         ttk.Button(controls, text="Export song WAV", command=self.export_music).grid(row=0, column=7)
-        ttk.Label(parent, text="Click cells to add or remove notes. The selected synth design is the instrument; one row is one semitone and one column is a sixteenth note.", wraplength=780).grid(row=1, column=0, sticky="w", pady=(0, 6))
+        ttk.Label(parent, text="Select a track, then click to add/remove notes or drag across cells to set note length. Each track can use the current design or a built-in instrument preset.", wraplength=780).grid(row=2, column=0, sticky="w", pady=(0, 6))
         self.piano_canvas = tk.Canvas(parent, height=432, background="#10131a", highlightthickness=0)
-        self.piano_canvas.grid(row=2, column=0, sticky="ew")
-        self.piano_canvas.bind("<Button-1>", self._toggle_piano_note)
+        self.piano_canvas.grid(row=3, column=0, sticky="ew")
+        self.piano_canvas.bind("<ButtonPress-1>", self._begin_piano_note)
+        self.piano_canvas.bind("<ButtonRelease-1>", self._finish_piano_note)
         self.piano_canvas.bind("<Configure>", lambda _event: self.draw_piano_roll())
         self.draw_piano_roll()
 
@@ -891,6 +949,19 @@ class SfxDesigner:
         except (KeyError, ValueError):
             return 16
 
+    def _selected_music_track(self) -> dict[str, Any]:
+        return self.music_track_vars[self.selected_music_track_var.get()]
+
+    def _piano_cell_at(self, event: tk.Event) -> tuple[int, int] | None:
+        if self.piano_canvas is None or event.x < 48:
+            return None
+        steps = self._music_step_count()
+        width, height = max(10, self.piano_canvas.winfo_width()), max(10, self.piano_canvas.winfo_height())
+        step = min(steps - 1, max(0, int((event.x - 48) / max(1, (width - 48) / steps))))
+        row_count = PIANO_HIGH_MIDI - PIANO_LOW_MIDI + 1
+        row = min(row_count - 1, max(0, int(event.y / max(1, height / row_count))))
+        return step, PIANO_HIGH_MIDI - row
+
     def draw_piano_roll(self) -> None:
         if self.piano_canvas is None:
             return
@@ -902,7 +973,7 @@ class SfxDesigner:
         row_count = PIANO_HIGH_MIDI - PIANO_LOW_MIDI + 1
         cell_width = max(1, (width - label_width) / steps)
         cell_height = height / row_count
-        active = {(note["step"], note["midi"]): note for note in self.music_notes}
+        active = {(note["step"], note["midi"]): note for note in self._selected_music_track()["notes"]}
         black_keys = {1, 3, 6, 8, 10}
         for row, midi in enumerate(range(PIANO_HIGH_MIDI, PIANO_LOW_MIDI - 1, -1)):
             y0, y1 = row * cell_height, (row + 1) * cell_height
@@ -919,40 +990,50 @@ class SfxDesigner:
                     end = min(steps, step + note["length"])
                     canvas.create_rectangle(x0 + 2, y0 + 2, label_width + end * cell_width - 2, y1 - 2, fill="#63c5ff", outline="")
 
-    def _toggle_piano_note(self, event: tk.Event) -> None:
-        if self.piano_canvas is None or event.x < 48:
+    def _begin_piano_note(self, event: tk.Event) -> None:
+        self._piano_drag_start = self._piano_cell_at(event)
+
+    def _finish_piano_note(self, event: tk.Event) -> None:
+        start = self._piano_drag_start
+        end = self._piano_cell_at(event)
+        self._piano_drag_start = None
+        if start is None or end is None or start[1] != end[1]:
             return
-        steps = self._music_step_count()
-        width, height = max(10, self.piano_canvas.winfo_width()), max(10, self.piano_canvas.winfo_height())
-        step = min(steps - 1, max(0, int((event.x - 48) / max(1, (width - 48) / steps))))
-        row_count = PIANO_HIGH_MIDI - PIANO_LOW_MIDI + 1
-        row = min(row_count - 1, max(0, int(event.y / max(1, height / row_count))))
-        midi = PIANO_HIGH_MIDI - row
-        existing = next((note for note in self.music_notes if note["step"] == step and note["midi"] == midi), None)
-        if existing:
-            self.music_notes.remove(existing)
+        step, midi = min(start[0], end[0]), start[1]
+        length = abs(end[0] - start[0]) + 1
+        notes = self._selected_music_track()["notes"]
+        existing = next((note for note in notes if note["step"] == step and note["midi"] == midi), None)
+        if existing and length == 1:
+            notes.remove(existing)
+        elif existing:
+            existing["length"] = length
         else:
-            self.music_notes.append({"step": step, "midi": midi, "length": 1, "velocity": 0.75})
+            notes.append({"step": step, "midi": midi, "length": length, "velocity": 0.75})
         self.draw_piano_roll()
 
     def _change_music_steps(self) -> None:
         steps = self._music_step_count()
-        self.music_notes = [note for note in self.music_notes if note["step"] < steps]
+        for track in self.music_track_vars:
+            track["notes"] = [note for note in track["notes"] if note["step"] < steps]
         self.draw_piano_roll()
 
     def clear_music_notes(self) -> None:
-        self.music_notes.clear()
+        self._selected_music_track()["notes"].clear()
         self.draw_piano_roll()
         self.status.set("Piano roll cleared")
 
     def load_minor_loop(self) -> None:
         self.music_vars["music_tempo_bpm"].set("112")
         self.music_vars["music_steps"].set("16")
-        self.music_notes = [
+        self.selected_music_track_var.set(0)
+        self.music_track_vars[0]["preset"].set("Ambient Hum")
+        self.music_track_vars[0]["notes"] = [
             {"step": step, "midi": midi, "length": 2, "velocity": 0.72}
             for step, chord in ((0, (57, 60, 64)), (4, (53, 57, 60)), (8, (55, 59, 62)), (12, (52, 55, 59)))
             for midi in chord
         ]
+        self.music_track_vars[1]["preset"].set("Custom")
+        self.music_track_vars[1]["notes"] = [{"step": step, "midi": midi, "length": 4, "velocity": .55} for step, midi in ((0, 45), (4, 41), (8, 43), (12, 40))]
         self.draw_piano_roll()
         self.status.set("Loaded editable minor loop")
 
@@ -1002,7 +1083,15 @@ class SfxDesigner:
         state["preset"] = self.preset_var.get()
         state["music_tempo_bpm"] = self._number(self.music_vars["music_tempo_bpm"], "music tempo")
         state["music_steps"] = int(self.music_vars["music_steps"].get())
-        state["music_notes"] = copy.deepcopy(self.music_notes)
+        state["music_tracks"] = [
+            {
+                "name": track["name"].get(), "preset": track["preset"].get(),
+                "volume": self._number(track["volume"], "track volume"), "muted": track["muted"].get(),
+                "notes": copy.deepcopy(track["notes"]),
+            }
+            for track in self.music_track_vars
+        ]
+        state["music_notes"] = copy.deepcopy(state["music_tracks"][0]["notes"])
         state["layers"] = []
         for variables in self.layer_vars:
             state["layers"].append({
@@ -1028,7 +1117,12 @@ class SfxDesigner:
                 variable.set(layer_state[key] if key == "enabled" else str(layer_state[key]))
         for key, variable in self.music_vars.items():
             variable.set(str(state[key]))
-        self.music_notes = copy.deepcopy(state["music_notes"])
+        for track_state, variables in zip(state["music_tracks"], self.music_track_vars):
+            variables["name"].set(track_state["name"])
+            variables["preset"].set(track_state["preset"])
+            variables["volume"].set(str(track_state["volume"]))
+            variables["muted"].set(track_state["muted"])
+            variables["notes"] = copy.deepcopy(track_state["notes"])
         self.state = state
         self._refresh_quick_layer_sliders()
         self._refresh_preset_browser()
@@ -1127,7 +1221,7 @@ class SfxDesigner:
     def preview_music(self) -> None:
         try:
             samples, state = generate_music_samples(self._state_from_ui())
-            if not state["music_notes"]:
+            if not any(track["notes"] for track in state["music_tracks"]):
                 self.status.set("Add notes to the piano roll before previewing.")
                 return
             self.stop_preview()
@@ -1173,7 +1267,7 @@ class SfxDesigner:
     def export_music(self) -> None:
         try:
             samples, state = generate_music_samples(self._state_from_ui())
-            if not state["music_notes"]:
+            if not any(track["notes"] for track in state["music_tracks"]):
                 self.status.set("Add notes to the piano roll before exporting.")
                 return
             filename = filedialog.asksaveasfilename(
@@ -1307,6 +1401,7 @@ def run_self_test() -> int:
         {"step": 0, "midi": 60, "length": 2, "velocity": .75},
         {"step": 4, "midi": 64, "length": 2, "velocity": .75},
     ]
+    music_state["music_tracks"][0]["notes"] = copy.deepcopy(music_state["music_notes"])
     music_a, normalized_music = generate_music_samples(music_state)
     music_b, _ = generate_music_samples(copy.deepcopy(music_state))
     expected_music_samples = int(normalized_music["music_steps"] * 60 / normalized_music["music_tempo_bpm"] / 4 * normalized_music["sample_rate"])
