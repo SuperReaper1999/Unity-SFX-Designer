@@ -20,6 +20,8 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -33,7 +35,7 @@ except ImportError:  # pragma: no cover - enables non-Windows self-tests
 
 
 APP_TITLE = "Unity SFX Designer"
-PROJECT_VERSION = 1
+PROJECT_VERSION = 2
 DEFAULT_SAMPLE_RATE = 44100
 MAX_DURATION_SECONDS = 12.0
 
@@ -41,7 +43,6 @@ MAX_DURATION_SECONDS = 12.0
 @dataclass
 class Layer:
     enabled: bool = False
-    waveform: str = "sine"
     frequency: float = 440.0
     gain: float = 0.25
     phase_degrees: float = 0.0
@@ -57,6 +58,7 @@ class Layer:
     decay: float = 0.0
     sustain: float = 1.0
     release: float = 0.0
+    waveform: str = "sine"
 
 
 def default_state() -> dict[str, Any]:
@@ -81,6 +83,17 @@ def default_state() -> dict[str, Any]:
         "delay_feedback": 0.25,
         "delay_mix": 0.0,
         "reverb_mix": 0.0,
+        "render_quality": "high",
+        "filter_mode": "lowpass",
+        "filter_cutoff_hz": 0.0,
+        "filter_resonance": 0.0,
+        "filter_envelope_amount": 0.0,
+        "transient_gain": 0.0,
+        "transient_decay": 0.025,
+        "pitch_drift_hz": 0.0,
+        "pitch_jitter_hz": 0.0,
+        "formant_low_hz": 0.0,
+        "formant_high_hz": 0.0,
         "normalize": True,
         "preset": "Custom",
         "layers": [asdict(Layer(enabled=index == 0)) for index in range(4)],
@@ -169,6 +182,18 @@ PRESET_CATEGORIES: dict[str, tuple[str, ...]] = {
     "Ambience": ("Ambient Hum",),
 }
 
+PRESETS.update({
+    "Pistol": make_preset("Pistol", name="Pistol", duration=.34, attack=.001, decay=.02, sustain=0, release=.16, noise_enabled=True, noise_color="band", noise_gain=.36, transient_gain=.7, transient_decay=.012, filter_cutoff_hz=5200, distortion=.32, layers=[asdict(Layer(True, 135, .7, 0, -90, 0, 0, .22)), asdict(Layer(True, 930, .14, 0, -650, 0, 0, .06)), asdict(Layer()), asdict(Layer())]),
+    "Rifle": make_preset("Rifle", name="Rifle", duration=.52, attack=.001, decay=.03, sustain=0, release=.24, noise_enabled=True, noise_color="band", noise_gain=.48, transient_gain=.82, transient_decay=.009, filter_cutoff_hz=6800, distortion=.42, layers=[asdict(Layer(True, 95, .75, 0, -70, 0, 0, .3)), asdict(Layer(True, 210, .24, 0, -130, 0, 0, .18)), asdict(Layer()), asdict(Layer())]),
+    "Shotgun": make_preset("Shotgun", name="Shotgun", duration=.8, attack=.001, decay=.04, sustain=0, release=.38, noise_enabled=True, noise_color="brown", noise_gain=.7, transient_gain=1.1, transient_decay=.02, filter_cutoff_hz=2600, distortion=.5, reverb_mix=.12, layers=[asdict(Layer(True, 65, .8, 0, -48, 0, 0, .45)), asdict(Layer()), asdict(Layer()), asdict(Layer())]),
+    "Melee Impact": make_preset("Melee Impact", name="Melee_Impact", duration=.3, attack=.001, decay=.025, sustain=0, release=.12, noise_enabled=True, noise_color="band", noise_gain=.3, transient_gain=.5, transient_decay=.016, filter_mode="bandpass", filter_cutoff_hz=1800, layers=[asdict(Layer(True, 165, .68, 0, -110, 0, 0, .22)), asdict(Layer()), asdict(Layer()), asdict(Layer())]),
+    "Ricochet": make_preset("Ricochet", name="Ricochet", duration=.48, attack=.001, decay=.04, sustain=0, release=.25, pitch_drift_hz=30, reverb_mix=.15, layers=[asdict(Layer(True, 1600, .3, 0, 1200, -500, 0, .45)), asdict(Layer(True, 2800, .12, 0, 400, -1100, 0, .25)), asdict(Layer()), asdict(Layer())]),
+    "Zombie Scream": make_preset("Zombie Scream", name="Zombie_Scream", duration=1.45, attack=.06, decay=.11, sustain=.6, release=.34, pitch_drift_hz=16, formant_low_hz=700, formant_high_hz=1800, distortion=.16, layers=[asdict(Layer(True, 260, .36, 0, -30, 85, 0, 1.45)), asdict(Layer(True, 390, .17, 0, -20, 65, 0, 1.2)), asdict(Layer()), asdict(Layer())]),
+    "Zombie Attack": make_preset("Zombie Attack", name="Zombie_Attack", duration=.62, attack=.01, decay=.07, sustain=.2, release=.24, noise_enabled=True, noise_color="pink", noise_gain=.14, formant_low_hz=520, formant_high_hz=1300, transient_gain=.18, layers=[asdict(Layer(True, 145, .42, 0, -45, 25, 0, .62)), asdict(Layer()), asdict(Layer()), asdict(Layer())]),
+})
+PRESET_CATEGORIES["Combat"] += ("Pistol", "Rifle", "Shotgun", "Melee Impact", "Ricochet")
+PRESET_CATEGORIES["Creatures"] += ("Zombie Scream", "Zombie Attack")
+
 
 def clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
@@ -191,7 +216,7 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     result["release"] = max(0.0, float(result["release"]))
     result["noise_gain"] = clamp(float(result["noise_gain"]), 0.0, 1.0)
     result["noise_color"] = str(result["noise_color"]).lower()
-    if result["noise_color"] not in ("white", "pink"):
+    if result["noise_color"] not in ("white", "pink", "brown", "band"):
         result["noise_color"] = "white"
     result["noise_seed"] = int(result["noise_seed"])
     result["lowpass_hz"] = max(0.0, float(result["lowpass_hz"]))
@@ -200,6 +225,21 @@ def validate_state(state: dict[str, Any]) -> dict[str, Any]:
     result["delay_feedback"] = clamp(float(result["delay_feedback"]), 0.0, 0.95)
     result["delay_mix"] = clamp(float(result["delay_mix"]), 0.0, 1.0)
     result["reverb_mix"] = clamp(float(result["reverb_mix"]), 0.0, 1.0)
+    result["render_quality"] = str(result["render_quality"]).lower()
+    if result["render_quality"] not in ("draft", "high"):
+        result["render_quality"] = "high"
+    result["filter_mode"] = str(result["filter_mode"]).lower()
+    if result["filter_mode"] not in ("lowpass", "highpass", "bandpass", "notch"):
+        result["filter_mode"] = "lowpass"
+    result["filter_cutoff_hz"] = clamp(float(result["filter_cutoff_hz"]), 0.0, 20000.0)
+    result["filter_resonance"] = clamp(float(result["filter_resonance"]), 0.0, 0.99)
+    result["filter_envelope_amount"] = clamp(float(result["filter_envelope_amount"]), -1.0, 1.0)
+    result["transient_gain"] = clamp(float(result["transient_gain"]), 0.0, 2.0)
+    result["transient_decay"] = clamp(float(result["transient_decay"]), 0.001, 1.0)
+    result["pitch_drift_hz"] = clamp(float(result["pitch_drift_hz"]), 0.0, 2000.0)
+    result["pitch_jitter_hz"] = clamp(float(result["pitch_jitter_hz"]), 0.0, 2000.0)
+    result["formant_low_hz"] = clamp(float(result["formant_low_hz"]), 0.0, 10000.0)
+    result["formant_high_hz"] = clamp(float(result["formant_high_hz"]), 0.0, 10000.0)
     result["noise_enabled"] = bool(result["noise_enabled"])
     result["normalize"] = bool(result["normalize"])
 
@@ -266,76 +306,85 @@ def layer_envelope(time_seconds: float, layer: dict[str, Any]) -> float:
 
 
 def generate_samples(raw_state: dict[str, Any]) -> tuple[list[float], dict[str, Any]]:
-    """Synthesize a deterministic mono floating-point buffer."""
+    """Synthesize deterministic high-quality mono audio, then downsample for Unity."""
     state = validate_state(raw_state)
-    sample_rate = state["sample_rate"]
-    count = max(1, int(state["duration"] * sample_rate))
-    duration = state["duration"]
-    samples = [0.0] * count
-    random_source = random.Random(state["noise_seed"])
-    pink_noise = 0.0
+    factor = 4 if state["render_quality"] == "high" else 1
+    output_rate = state["sample_rate"]
+    rate = output_rate * factor
+    count = max(1, int(state["duration"] * rate))
+    time = np.arange(count, dtype=np.float64) / rate
+    random_source = np.random.default_rng(state["noise_seed"])
+    samples = np.zeros(count, dtype=np.float64)
 
-    for sample_index in range(count):
-        time_seconds = sample_index / sample_rate
-        value = 0.0
-        for layer in state["layers"]:
-            if not layer["enabled"] or not (layer["start_time"] <= time_seconds <= layer["end_time"]):
-                continue
-            layer_duration = max(0.0001, layer["end_time"] - layer["start_time"])
-            progress = clamp((time_seconds - layer["start_time"]) / layer_duration, 0.0, 1.0)
-            frequency = layer["frequency"] + layer["sweep_start"] * (1.0 - progress) + layer["sweep_end"] * progress
-            if layer["fm_frequency"] > 0.0 and layer["fm_depth_hz"] > 0.0:
-                frequency += math.sin(math.tau * layer["fm_frequency"] * time_seconds) * layer["fm_depth_hz"]
-            frequency = clamp(frequency, 1.0, sample_rate * 0.45)
-            phase = math.radians(layer["phase_degrees"])
-            amplitude = 1.0
-            if layer["lfo_frequency"] > 0.0 and layer["lfo_depth"] > 0.0:
-                amplitude = 1.0 - layer["lfo_depth"] * 0.5 + math.sin(math.tau * layer["lfo_frequency"] * time_seconds) * layer["lfo_depth"] * 0.5
-            value += oscillator(layer["waveform"], math.tau * frequency * time_seconds + phase) * layer["gain"] * amplitude * layer_envelope(time_seconds, layer)
-        if state["noise_enabled"]:
-            white = random_source.uniform(-1.0, 1.0)
-            if state["noise_color"] == "pink":
-                pink_noise = pink_noise * 0.985 + white * 0.15
-                white = pink_noise
-            value += white * state["noise_gain"]
-        samples[sample_index] = value * envelope(time_seconds, duration, state)
+    def adsr(t: np.ndarray, duration: float, values: dict[str, Any]) -> np.ndarray:
+        attack, decay, release, sustain = values["attack"], values["decay"], values["release"], values["sustain"]
+        result = np.full_like(t, sustain)
+        if attack > 0: result = np.where(t < attack, t / attack, result)
+        if decay > 0: result = np.where((t >= attack) & (t < attack + decay), 1 - (1 - sustain) * ((t - attack) / decay), result)
+        if release > 0: result = np.where(t >= duration - release, sustain * np.clip((duration - t) / release, 0, 1), result)
+        return np.clip(result, 0, 1)
 
-    if state["lowpass_hz"] > 0.0:
-        cutoff = min(state["lowpass_hz"], sample_rate * 0.45)
-        alpha = (math.tau * cutoff) / (sample_rate + math.tau * cutoff)
-        filtered = 0.0
-        for index, value in enumerate(samples):
-            filtered += alpha * (value - filtered)
-            samples[index] = filtered
+    for layer in state["layers"]:
+        if not layer["enabled"] or layer["end_time"] <= layer["start_time"]: continue
+        mask = (time >= layer["start_time"]) & (time <= layer["end_time"])
+        local = np.clip((time - layer["start_time"]) / max(.0001, layer["end_time"] - layer["start_time"]), 0, 1)
+        frequency = layer["frequency"] + layer["sweep_start"] * (1 - local) + layer["sweep_end"] * local
+        frequency += np.sin(math.tau * layer["fm_frequency"] * time) * layer["fm_depth_hz"]
+        if state["pitch_drift_hz"]: frequency += np.sin(math.tau * 0.31 * time) * state["pitch_drift_hz"]
+        if state["pitch_jitter_hz"]: frequency += random_source.normal(0, state["pitch_jitter_hz"], count)
+        frequency = np.clip(frequency, 1, rate * .45)
+        phase = math.radians(layer["phase_degrees"]) + math.tau * np.cumsum(frequency) / rate
+        if layer["waveform"] == "square": signal = np.sign(np.sin(phase))
+        elif layer["waveform"] == "triangle": signal = 2 / math.pi * np.arcsin(np.sin(phase))
+        elif layer["waveform"] == "sawtooth": signal = 2 * ((phase / math.tau) % 1) - 1
+        else: signal = np.sin(phase)
+        amplitude = 1 - layer["lfo_depth"] * .5 + np.sin(math.tau * layer["lfo_frequency"] * time) * layer["lfo_depth"] * .5
+        samples += signal * layer["gain"] * amplitude * adsr(time - layer["start_time"], layer["end_time"] - layer["start_time"], layer) * mask
 
-    if state["distortion"] > 0.0:
-        drive = 1.0 + state["distortion"] * 14.0
-        for index, value in enumerate(samples):
-            samples[index] = math.tanh(value * drive) / math.tanh(drive)
+    if state["noise_enabled"]:
+        noise = random_source.normal(0, 1, count)
+        if state["noise_color"] in ("pink", "brown"):
+            noise = np.cumsum(noise)
+            noise /= max(np.max(np.abs(noise)), 1e-9)
+            if state["noise_color"] == "pink": noise = np.diff(noise, prepend=noise[0]) * 20
+        if state["noise_color"] == "band": noise = np.convolve(noise, np.ones(9) / 9, mode="same")
+        samples += noise * state["noise_gain"]
 
-    if state["delay_time"] > 0.0 and state["delay_mix"] > 0.0:
-        delay_samples = max(1, int(state["delay_time"] * sample_rate))
-        delayed = [0.0] * len(samples)
-        for index, value in enumerate(samples):
-            echo = delayed[index - delay_samples] if index >= delay_samples else 0.0
-            delayed[index] = value + echo * state["delay_feedback"]
-            samples[index] = value * (1.0 - state["delay_mix"]) + echo * state["delay_mix"]
+    master = adsr(time, state["duration"], state)
+    samples *= master
+    if state["transient_gain"]: samples += random_source.normal(0, 1, count) * state["transient_gain"] * np.exp(-time / state["transient_decay"])
 
-    if state["reverb_mix"] > 0.0:
-        reverbed = samples[:]
-        for delay_seconds, gain in ((0.029, 0.38), (0.047, 0.27), (0.071, 0.19)):
-            delay_samples = int(delay_seconds * sample_rate)
-            for index in range(delay_samples, len(samples)):
-                reverbed[index] += samples[index - delay_samples] * gain
-        for index, value in enumerate(samples):
-            samples[index] = value * (1.0 - state["reverb_mix"]) + reverbed[index] * state["reverb_mix"]
-
-    peak = max((abs(value) for value in samples), default=0.0)
-    if state["normalize"] and peak > 0.000001:
-        scale = min(1.0 / peak, 4.0) * state["master_gain"]
-    else:
-        scale = state["master_gain"]
-    return [clamp(value * scale, -1.0, 1.0) for value in samples], state
+    cutoff = (state["filter_cutoff_hz"] or state["lowpass_hz"]) * (1 + state["filter_envelope_amount"] * (state["sustain"] - .5))
+    if cutoff > 0:
+        alpha = min(.99, math.tau * cutoff / (rate + math.tau * cutoff))
+        low = np.empty_like(samples); low[0] = samples[0]
+        for i in range(1, count): low[i] = low[i-1] + alpha * (samples[i] - low[i-1])
+        high = samples - low
+        if state["filter_mode"] == "highpass": samples = high
+        elif state["filter_mode"] == "bandpass": samples = high * low * (1 + state["filter_resonance"] * 8)
+        elif state["filter_mode"] == "notch": samples = samples - high * state["filter_resonance"]
+        else: samples = low
+    for formant in (state["formant_low_hz"], state["formant_high_hz"]):
+        if formant > 0:
+            carrier = np.sin(math.tau * formant * time)
+            samples += samples * carrier * .18
+    if state["distortion"]:
+        drive = 1 + state["distortion"] * 14
+        samples = np.tanh(samples * drive) / math.tanh(drive)
+    if state["delay_time"] and state["delay_mix"]:
+        delay = max(1, int(state["delay_time"] * rate)); wet = np.zeros_like(samples)
+        for i in range(delay, count): wet[i] = samples[i-delay] + wet[i-delay] * state["delay_feedback"]
+        samples = samples * (1 - state["delay_mix"]) + wet * state["delay_mix"]
+    if state["reverb_mix"]:
+        wet = samples.copy()
+        for seconds, gain in ((.029,.38),(.047,.27),(.071,.19),(.113,.13)):
+            delay = int(seconds * rate); wet[delay:] += samples[:-delay] * gain
+        samples = samples * (1-state["reverb_mix"]) + wet * state["reverb_mix"]
+    if factor > 1:
+        kernel = np.hanning(17); kernel /= kernel.sum(); samples = np.convolve(samples, kernel, mode="same")[::factor]
+    peak = max(float(np.max(np.abs(samples))), 1e-9)
+    scale = min(1 / peak, 4) * state["master_gain"] if state["normalize"] else state["master_gain"]
+    return np.clip(samples * scale, -1, 1).tolist(), state
 
 
 def write_wav(path: str | Path, samples: list[float], sample_rate: int) -> None:
@@ -481,6 +530,15 @@ class SfxDesigner:
         ttk.Entry(parent, textvariable=variable, width=width).grid(row=row, column=column + 1, sticky="w", padx=(0, 10), pady=2)
 
     def _build_controls(self, parent: ttk.Frame) -> None:
+        notebook = ttk.Notebook(parent)
+        notebook.grid(row=0, column=0, sticky="nsew")
+        design_tab = ttk.Frame(notebook, padding=6)
+        realism_tab = ttk.Frame(notebook, padding=6)
+        mix_tab = ttk.Frame(notebook, padding=6)
+        notebook.add(design_tab, text="Design")
+        notebook.add(realism_tab, text="Realism")
+        notebook.add(mix_tab, text="Mix & Export")
+        parent = design_tab
         parent.columnconfigure(0, weight=1)
         global_frame = ttk.LabelFrame(parent, text="Global output", padding=8)
         global_frame.grid(row=0, column=0, sticky="ew", pady=(0, 8))
@@ -502,12 +560,12 @@ class SfxDesigner:
         self._add_field(envelope_frame, 0, 4, "Sustain", "sustain", 0.7)
         self._add_field(envelope_frame, 0, 6, "Release", "release", 0.16)
 
-        effects_frame = ttk.LabelFrame(parent, text="Noise and master effects", padding=8)
+        effects_frame = ttk.LabelFrame(realism_tab, text="Noise and master effects", padding=8)
         effects_frame.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         self.global_vars["noise_enabled"] = tk.BooleanVar(value=False)
         ttk.Checkbutton(effects_frame, text="Noise", variable=self.global_vars["noise_enabled"]).grid(row=0, column=0, sticky="w", padx=(0, 8))
         self.global_vars["noise_color"] = tk.StringVar(value="white")
-        ttk.Combobox(effects_frame, textvariable=self.global_vars["noise_color"], values=("white", "pink"), state="readonly", width=8).grid(row=0, column=1, sticky="w", padx=(0, 8))
+        ttk.Combobox(effects_frame, textvariable=self.global_vars["noise_color"], values=("white", "pink", "brown", "band"), state="readonly", width=8).grid(row=0, column=1, sticky="w", padx=(0, 8))
         self._add_field(effects_frame, 0, 2, "Noise gain", "noise_gain", 0.0)
         self._add_field(effects_frame, 0, 4, "Seed", "noise_seed", 1337)
         self._add_field(effects_frame, 1, 0, "Low-pass Hz (0 off)", "lowpass_hz", 0.0, 12)
@@ -517,8 +575,26 @@ class SfxDesigner:
         self._add_field(effects_frame, 2, 0, "Delay mix", "delay_mix", 0.0)
         self._add_field(effects_frame, 2, 2, "Reverb mix", "reverb_mix", 0.0)
 
-        quick_global_frame = ttk.LabelFrame(parent, text="Quick global sliders", padding=8)
-        quick_global_frame.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        realism_frame = ttk.LabelFrame(realism_tab, text="Realism DSP", padding=8)
+        realism_frame.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        ttk.Label(realism_frame, text="Quality").grid(row=0, column=0, sticky="w", padx=(0, 4))
+        self.global_vars["render_quality"] = tk.StringVar(value="high")
+        ttk.Combobox(realism_frame, textvariable=self.global_vars["render_quality"], values=("draft", "high"), state="readonly", width=8).grid(row=0, column=1, sticky="w", padx=(0, 10))
+        ttk.Label(realism_frame, text="Filter").grid(row=0, column=2, sticky="w", padx=(0, 4))
+        self.global_vars["filter_mode"] = tk.StringVar(value="lowpass")
+        ttk.Combobox(realism_frame, textvariable=self.global_vars["filter_mode"], values=("lowpass", "highpass", "bandpass", "notch"), state="readonly", width=10).grid(row=0, column=3, sticky="w", padx=(0, 10))
+        self._add_field(realism_frame, 0, 4, "Cutoff Hz", "filter_cutoff_hz", 0.0)
+        self._add_field(realism_frame, 0, 6, "Resonance", "filter_resonance", 0.0)
+        self._add_field(realism_frame, 1, 0, "Filter envelope", "filter_envelope_amount", 0.0)
+        self._add_field(realism_frame, 1, 2, "Transient", "transient_gain", 0.0)
+        self._add_field(realism_frame, 1, 4, "Transient decay", "transient_decay", 0.025)
+        self._add_field(realism_frame, 1, 6, "Pitch drift Hz", "pitch_drift_hz", 0.0)
+        self._add_field(realism_frame, 2, 0, "Pitch jitter Hz", "pitch_jitter_hz", 0.0)
+        self._add_field(realism_frame, 2, 2, "Formant low Hz", "formant_low_hz", 0.0)
+        self._add_field(realism_frame, 2, 4, "Formant high Hz", "formant_high_hz", 0.0)
+
+        quick_global_frame = ttk.LabelFrame(mix_tab, text="Quick global sliders", padding=8)
+        quick_global_frame.grid(row=4, column=0, sticky="ew", pady=(0, 8))
         quick_global_frame.columnconfigure(1, weight=1)
         quick_global_frame.columnconfigure(4, weight=1)
         self._add_quick_slider(quick_global_frame, 0, 0, "Duration", "duration", 0.01, MAX_DURATION_SECONDS, 0.01)
@@ -527,9 +603,10 @@ class SfxDesigner:
         self._add_quick_slider(quick_global_frame, 1, 3, "Release", "release", 0.0, 2.0, 0.01)
         self._add_quick_slider(quick_global_frame, 2, 0, "Distortion", "distortion", 0.0, 1.0, 0.01)
         self._add_quick_slider(quick_global_frame, 2, 3, "Reverb", "reverb_mix", 0.0, 1.0, 0.01)
+        ttk.Label(mix_tab, text="Preview, WAV export, variations, and Unity Pack export are available in the top toolbar.", wraplength=600).grid(row=1, column=0, sticky="w", pady=(12, 0))
 
         layers_frame = ttk.LabelFrame(parent, text="Oscillator layers", padding=8)
-        layers_frame.grid(row=4, column=0, sticky="nsew")
+        layers_frame.grid(row=5, column=0, sticky="nsew")
         headers = ("On", "Wave", "Frequency", "Gain", "Phase°", "Sweep start", "Sweep end", "Start", "End")
         for column, title in enumerate(headers):
             ttk.Label(layers_frame, text=title, font=("Segoe UI", 9, "bold")).grid(row=0, column=column, padx=3, pady=(0, 4), sticky="w")
@@ -547,7 +624,7 @@ class SfxDesigner:
             self.layer_vars.append(values)
 
         shaping_frame = ttk.LabelFrame(parent, text="Per-layer modulation and envelope", padding=8)
-        shaping_frame.grid(row=5, column=0, sticky="ew", pady=(8, 0))
+        shaping_frame.grid(row=6, column=0, sticky="ew", pady=(8, 0))
         headers = ("FM Hz", "FM depth Hz", "LFO Hz", "LFO depth", "Attack", "Decay", "Sustain", "Release")
         for column, title in enumerate(headers):
             ttk.Label(shaping_frame, text=title, font=("Segoe UI", 9, "bold")).grid(row=0, column=column + 1, padx=3, pady=(0, 4), sticky="w")
@@ -561,7 +638,7 @@ class SfxDesigner:
                 ttk.Entry(shaping_frame, textvariable=values[key], width=9).grid(row=index + 1, column=column, padx=3, pady=2)
 
         quick_layer_frame = ttk.LabelFrame(parent, text="Quick selected-layer sliders", padding=8)
-        quick_layer_frame.grid(row=6, column=0, sticky="ew", pady=(8, 0))
+        quick_layer_frame.grid(row=7, column=0, sticky="ew", pady=(8, 0))
         for index in range(4):
             ttk.Radiobutton(quick_layer_frame, text=f"Layer {index + 1}", variable=self.selected_layer_var, value=index,
                             command=self._refresh_quick_layer_sliders).grid(row=0, column=index, padx=(0, 8), sticky="w")
@@ -615,13 +692,15 @@ class SfxDesigner:
         state = default_state()
         for key in ("name",):
             state[key] = self.global_vars[key].get()
-        for key in ("duration", "master_gain", "attack", "decay", "sustain", "release", "noise_gain", "lowpass_hz", "distortion", "delay_time", "delay_feedback", "delay_mix", "reverb_mix"):
+        for key in ("duration", "master_gain", "attack", "decay", "sustain", "release", "noise_gain", "lowpass_hz", "distortion", "delay_time", "delay_feedback", "delay_mix", "reverb_mix", "filter_cutoff_hz", "filter_resonance", "filter_envelope_amount", "transient_gain", "transient_decay", "pitch_drift_hz", "pitch_jitter_hz", "formant_low_hz", "formant_high_hz"):
             state[key] = self._number(self.global_vars[key], key.replace("_", " "))
         state["variation_amount"] = self._number(self.global_vars["variation_amount"], "variation percentage") / 100.0
         state["sample_rate"] = int(self.global_vars["sample_rate"].get())
         state["noise_seed"] = int(self._number(self.global_vars["noise_seed"], "noise seed"))
         state["noise_enabled"] = self.global_vars["noise_enabled"].get()
         state["noise_color"] = self.global_vars["noise_color"].get()
+        state["render_quality"] = self.global_vars["render_quality"].get()
+        state["filter_mode"] = self.global_vars["filter_mode"].get()
         state["normalize"] = self.global_vars["normalize"].get()
         state["preset"] = self.preset_var.get()
         state["layers"] = []
