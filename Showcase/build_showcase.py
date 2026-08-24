@@ -49,6 +49,23 @@ def make_safehouse() -> dict:
     return state
 
 
+def make_sawtooth_showcase() -> dict:
+    state = default_state()
+    state.update({"name": "Sawtooth_Synth_Loop", "music_tempo_bpm": 124, "music_steps": 16, "master_gain": .9,
+                  "attack": .006, "decay": .09, "sustain": .58, "release": .12,
+                  "lowpass_hz": 3200, "distortion": .08, "delay_time": .09, "delay_feedback": .24, "delay_mix": .16})
+    state["layers"][0].update({"enabled": True, "waveform": "sawtooth", "frequency": 440, "gain": .6})
+    state["layers"][1].update({"enabled": True, "waveform": "sawtooth", "frequency": 880, "gain": .16})
+    state["layers"][2].update({"enabled": False})
+    state["music_tracks"] = [
+        track("Saw Lead", "Custom", 1.0, [(0, 60, 2, .9), (2, 64, 2, .8), (4, 67, 2, .9), (6, 72, 2, .85), (8, 69, 2, .9), (10, 67, 2, .8), (12, 64, 2, .85), (14, 60, 2, .8)]),
+        track("Saw Bass", "Custom", .72, [(0, 36, 4, .85), (4, 41, 4, .85), (8, 43, 4, .85), (12, 40, 4, .85)]),
+        track("Unused", "Custom", 0, []),
+        track("Unused", "Custom", 0, []),
+    ]
+    return state
+
+
 def make_sfx() -> dict[str, dict]:
     return {
         "Loot_Pickup": copy.deepcopy(PRESETS["Pickup"]),
@@ -73,10 +90,11 @@ def main() -> None:
     OUTPUT.mkdir(parents=True, exist_ok=True)
     render("Night_Patrol", make_night_patrol(), music=True)
     render("Safehouse_Morning", make_safehouse(), music=True)
+    render("Sawtooth_Synth_Loop", make_sawtooth_showcase(), music=True)
     for name, state in make_sfx().items():
         state["name"] = name
         render(name, state, music=False)
-    print(f"Rendered 6 editable showcase sounds to {OUTPUT}")
+    print(f"Rendered 7 editable showcase sounds to {OUTPUT}")
 
 
 if __name__ == "__main__":
