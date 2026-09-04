@@ -22,6 +22,8 @@ from typing import Any
 
 import numpy as np
 
+from dialogue_studio import DialogueStudio
+
 try:
     import tkinter as tk
     from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -585,6 +587,8 @@ class SfxDesigner:
         self.piano_waveform_var = tk.StringVar(value="sine")
         self._piano_drag_start: tuple[int, int] | None = None
         self.piano_canvas: tk.Canvas | None = None
+        self.status = tk.StringVar(value="Ready")
+        self.dialogue_studio = DialogueStudio(self.root, self.status.set)
         self._build_ui()
         self._load_state_into_ui(self.state)
         self._watch_waveform_controls()
@@ -622,7 +626,6 @@ class SfxDesigner:
         self.spectrum_canvas.pack(fill="x", pady=(8, 12))
         self.spectrum_canvas.bind("<Configure>", lambda _event: self.refresh_waveform())
         ttk.Label(preview, text="Output is 16-bit mono PCM WAV. Unity imports it directly as an AudioClip.", wraplength=330).pack(anchor="w")
-        self.status = tk.StringVar(value="Ready")
         ttk.Label(self.root, textvariable=self.status, relief=tk.SUNKEN, anchor="w", padding=(8, 4)).grid(row=2, column=0, sticky="ew")
 
     def _add_quick_slider(self, parent: ttk.Frame, row: int, column: int, label: str, key: str, minimum: float, maximum: float, resolution: float) -> None:
@@ -787,10 +790,13 @@ class SfxDesigner:
         realism_tab = ttk.Frame(notebook, padding=6)
         piano_tab = ttk.Frame(notebook, padding=6)
         mix_tab = ttk.Frame(notebook, padding=6)
+        dialogue_tab = ttk.Frame(notebook, padding=6)
         notebook.add(design_tab, text="Design")
         notebook.add(realism_tab, text="Realism")
         notebook.add(piano_tab, text="Piano")
         notebook.add(mix_tab, text="Mix & Export")
+        notebook.add(dialogue_tab, text="Dialogue Studio")
+        self.dialogue_studio.build(dialogue_tab)
         parent = design_tab
         parent.columnconfigure(0, weight=1)
         self._build_preset_browser(parent)

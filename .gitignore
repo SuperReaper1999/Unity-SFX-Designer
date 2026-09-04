@@ -5,3 +5,9 @@ __pycache__/
 !Showcase/Audio/
 !Showcase/Audio/*.wav
 !Showcase/Audio/*.sfx.json
+.local-tts/
+.kokoro-cache/
+.installer-cache/
+.installer-temp/
+GeneratedDialogue/
+.python312/

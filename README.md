@@ -66,3 +66,32 @@ python sine_sfx_designer.py --self-test
 ```
 
 This exports every built-in preset to a temporary location and verifies the required Unity WAV format.
+
+## Dialogue Studio (free local Kokoro TTS)
+
+The **Dialogue Studio** tab turns quest dialogue into WAV files with the free local Kokoro model. Add one line or queue a batch, choose a character profile/voice, choose a pace, and generate the WAVs into an output folder. It writes `dialogue_manifest.json` beside the audio, preserving the speaker, line ID, text, voice, speed, and filename for assignment to Unity `DialogueNode` assets.
+
+There is no API key, OpenAI account, or per-line bill. Kokoro runs locally after its one-time download. Its Apache-2.0 model weighs roughly 363 MB, so it is deliberately kept out of the repository and C: drive.
+
+### One-time local setup — S: only
+
+Double-click `Install Local Kokoro TTS.bat` in this tool folder. It installs Kokoro and its Python dependencies into:
+
+```text
+S:\Repos\Unity-SFX-Designer\.local-tts
+```
+
+The first generated line downloads the model into:
+
+```text
+S:\Repos\Unity-SFX-Designer\.kokoro-cache
+```
+
+The installer sets its package, download, temporary, and model locations beneath this tool folder. It does not use C: for the installation or model cache. The download needs internet once; generation is offline afterwards.
+
+### Recommended Unity workflow
+
+1. Give each spoken `DialogueNode` line a stable ID such as `autumn_intro_01`.
+2. Generate the matching WAV file in Dialogue Studio.
+3. Copy the generated folder beneath your Unity project's `Assets` directory.
+4. Assign the imported WAV clips to the matching dialogue-line voice clip slots. Keep `dialogue_manifest.json` alongside the clips as the line-to-file reference.
